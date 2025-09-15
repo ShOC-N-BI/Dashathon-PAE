@@ -1,0 +1,38 @@
+{
+    "action_prompt": [
+        {
+            "parameters": ["TORPEDO 2x were observed on EO/IR"],
+            "expected": ["COUNTER", "EVADE", "BRACE FOR IMPACT"]
+        }, {
+            "parameters": ["RADIO 2111Z emmission were detected at"],
+            "expected": ["JAM", "COMMUNICATE", "INVESTIGATE"]
+        }, {
+            "parameters": ["DDG Cole @Maritime_OPS (Maritime Operations Center)"],
+            "expected": ["ATTACK", "INVESTIGATE", "COMMUNICATE"]
+        }, {
+            "parameters": ["J-16 2x were observed on EO/IR"],
+            "expected": ["ATTACK", "INVESTIGATE", "COMMUNICATE", "DESTROY"]
+        }, {
+            "parameters": ["J-15 1x each track"],
+            "expected": ["ATTACK", "INVESTIGATE", "COMMUNICATE", "DESTROY"]
+        }
+    ],
+    "extracted_chat": [
+        {
+            "parameters": ["[10:48:58] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) 2x Torpedo were observed on EO/IR Imagery located on parking apron forward of aircraft hangers IVO 25.045310306035184, -77.464458773165 in Lane Flamingo"],
+            "expected": ["TORPEDO 2x were observed on EO/IR", "COUNTER", "EVADE", "BRACE FOR IMPACT"]
+        }, {
+            "parameters": ["[11:00:11] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) From 1205Z to 2111Z Radio emmission were detected at location  27.689097938330395, -80.38238737940404 operating on VHF. in Lane Bellagio"],
+            "expected": ["RADIO 2111Z emmission were detected at", "JAM", "COMMUNICATE", "INVESTIGATE"]
+        }, {
+            "parameters": ["[10:45:02] WF_Clark: Floater03_OPS (USS Cole DDG): @Maritime_OPS (Maritime Operations Center) Possible helos swarm approaching from south, type unk.  Main generator still inop, drifting WNW at 5 knots, req support in Lane Ceasars"],
+            "expected": ["DDG Cole @Maritime_OPS (Maritime Operations Center)", "ATTACK", "INVESTIGATE", "COMMUNICATE"]
+        }, {
+            "parameters": ["[10:48:58] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) 2x J-16s were observed on EO/IR Imagery located on parking apron forward of aircraft hangers IVO 25.045310306035184, -77.464458773165 in Lane Flamingo"],
+            "expected": ["J-16 2x were observed on EO/IR", "ATTACK", "INVESTIGATE", "COMMUNICATE"]
+        }, {
+            "parameters": ["[11:22:33] WF_FYST: IntelOps: @ Hydro_MSO, TN 44993/94/95/96 are all 1x J-15 each track."],
+            "expected": ["J-15 1x each track.", "ATTACK", "INVESTIGATE", "COMMUNICATE"]
+        }
+    ]
+}

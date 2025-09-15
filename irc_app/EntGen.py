@@ -1,131 +1,70 @@
 import re
+import os
+import json
+import psycopg2
 
-air_enemy = ["UAV", "BOGEY", "BANDIT", "BANZAI",
-    "BANDIT", "BOGEY", "BOGEY DOPE", "BLOW THROUGH", "BLOODHOUND", "BRACKET", 
-    "BREAK (DIRECTION)", "BREAKAWAY", "BINGO", "BREVITY", "BRUISER", "BUGOUT", "BUSTER", "MIG-21", "MIG-15", "MIG-17", "MIG-19", "MIG-23", "MIG-25", "MIG-29", "MIG-31",
-    "SU-7", "SU-9", "SU-11", "SU-15", "SU-17", "SU-20", "SU-22", "SU-24", "SU-25",
-    "SU-27", "SU-30", "SU-33", "SU-35", "SU-57", "YAK-9", "YAK-23", "YAK-25", "YAK-28",
-    "YAK-38", "YAK-41", "J-16", "J-50", "J-36", "J-35", "J-20", "J-15", "J-16", "J-10B", "J-11B", "J-10", "FC-1", 
-    "JH-7", "Su-30MK2", "Su-30MKK", "Su-35S", "J-11D", "J-13", "J-12", "J-11", "J-9", 
-    "J-8", "J-7", "J-6", "J-5", "J-2", "MiG-9", "Su-27", "Q-5", "Q-6", "J-16D", "J-15D", 
-    "H-20", "H-8", "H-7", "H-6", "H-5", "Tu-14", "Tu-2", "KJ-600", "KJ-500", "KJ-2000", 
-    "Y-9JZ ELINT", "Y-8CB", "Y-8DZ", "Y-8G", "Y-8GX3", "Y-8JB", "Y-8T", "Y-8W", "Y-8EW", 
-    "ZDK03", "Y-8J", "KJ-200", "Y-7", "KJ-1 AEWC", "An-30", "CIOMP", 
-    "YY-20", "HY-6", "Il-78", "JZ-8", "JZ-7", "MIG-29", "MIG-31", "MIG-35", "SU-27", "SU-30", "SU-34", "SU-35", "SU-57", 
-    "SU-24", "SU-25", "MI-8", "MI-24", "MI-28", "KA-52", "KA-60", "ANSAT", 
-    "PANTHER", "IL-76", "IL-78", "IL-112", "IL-214", "AN-26", "AN-72", 
-    "BE-200", "TU-22M", "TU-160", "TU-95", "B-2", "S-400", "T-50", "T-14", 
-    "AWACS", "AIRCRAFT", "HELICOPTER", "HELO", "BOMBER", "BOMBERS", "FIGHTER", "FIGHTERS", "A/C", "AIRCRAFTS",
-    "MIG21", "MIG15", "MIG17", "MIG19", "MIG23", "MIG25", "MIG29", "MIG31",
-    "SU7", "SU9", "SU11", "SU15", "SU17", "SU20", "SU22", "SU24", "SU25",
-    "SU27", "SU30", "SU33", "SU35", "SU57", "YAK9", "YAK23", "YAK25", "YAK28",
-    "YAK38", "YAK41", "J16", "J50", "J36", "J35", "J20", "J15", "J16", "J10B", "J11B", "J10", "FC1", 
-    "JH7", "Su30MK2", "Su30MKK", "Su35S", "J11D", "J13", "J12", "J11", "J9", 
-    "J8", "J7", "J6", "J5", "J2", "MiG9", "Su27", "Q5", "Q6", "J16D", "J15D", 
-    "H20", "H8", "H7", "H6", "H5", "Tu14", "Tu2", "KJ600", "KJ500", "KJ2000", 
-    "Y9JZ ELINT", "Y8CB", "Y8DZ", "Y8G", "Y8GX3", "Y8JB", "Y8T", "Y8W", "Y8EW", 
-    "ZDK03", "Y8J", "KJ200", "Y7", "KJ1 AEWC", "An30",
-    "YY20", "HY6", "Il78", "JZ8", "JZ7", "MIG29", "MIG31", "MIG35", "SU27", "SU30", "SU34", "SU35", "SU57", 
-    "SU24", "SU25", "MI8", "MI24", "MI28", "KA52", "KA60", "IL76", "IL78", "IL112", "IL214", "AN26", "AN72", 
-    "BE200", "TU22M", "TU160", "TU95", "B2", "S400", "T50", "T14"
-]
+# To ensure that we load the words file from the directory of the script we have to do these extra steps
+script_dir = os.path.dirname(__file__)
+with open(os.path.join(script_dir, 'words.json'), 'r') as file:
+    words = json.load(file)
+    ACTIONS = words["ACTIONS"]
+    WORDS = words["WORDS"]
+    BATTLE_DICTIONARY = words["BATTLE DICTIONARY"]  
 
-surface = ["DESTROYER", "DD", "FRIGATE", "FF", "CRUISER", "CC", "SUBMARINE", "SUB", 
-    "CARRIER", "CV", "BANZAI", "BRACKET", "BUMP/BUMP-UP", "BURN-GLINT", "BUSTER", 
-    "BLANK", "BULLDOG", "BREVITY", "BANDIT", "BOGEY", "BASSETT", "BRUISER", "COBRA", 
-    "COWBOYS", "CYCLOPS", "DEADEYE", "JASSM", "ATTACK", "AAV", "DDG", "CVN", "CG", 
-    "LHD", "LPD", "LCS", "SSN", "SSBN", "LHA", "T-AKE", "AOR", "LST", "T-AO", "FFG", 
-    "RADAR", "VESSEL", "SHIP", "BB", "CA", "SSGN", "LSD", "AO", "AE", "AK", "AR", "PC", 
-    "PY", "MCM", "MSC", "AIRCRAFT-CARRIER", "NUCLEAR-POWERED-AIRCRAFT-CARRIER", "BATTLESHIP", 
-    "HEAVY-CRUISER", "GUIDED-MISSILE-CRUISER", "DESTROYER", "GUIDED-MISSILE-DESTROYER", 
-    "FRIGATE", "GUIDED-MISSILE-FRIGATE", "SUBMARINE-(DIESEL-ELECTRIC)", 
-    "NUCLEAR-POWERED-SUBMARINE-(ATTACK)", "NUCLEAR-POWERED-BALLISTIC-MISSILE-SUBMARINE", 
-    "NUCLEAR-POWERED-GUIDED-MISSILE-SUBMARINE", "AMPHIBIOUS-ASSAULT-SHIP", 
-    "AMPHIBIOUS-ASSAULT-SHIP-(DIFFERENT-CONFIGURATION)", "AMPHIBIOUS-TRANSPORT-DOCK", 
-    "LANDING-SHIP-TANK", "DOCK-LANDING-SHIP", "FLEET-OILER", "AMMUNITION-SHIP", 
-    "CARGO-SHIP", "REPAIR-SHIP", "PATROL-CRAFT", "PATROL-YACHT", 
-    "MINE-COUNTERMEASURES-SHIP", "MINESWEEPER-COMMAND-SHIP"
+    # Flatten all battle dictionary keywords into a single set (lowercased for case-insensitive matching)
+battle_words = set(
+    word.upper()
+    for category in words["BATTLE DICTIONARY"].values()
+    for word in category
+)
+battle_lookup = {}
+for category, words in BATTLE_DICTIONARY.items():
+    for word in words:
+        battle_lookup[word.upper()] = category
+#message = "[10:48:58] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) 2x Torpedo 18675 were observed on EO/IR Imagery located on parking apron forward of aircraft hangers IVO 25.045310306035184, -77.464458773165 in Lane Flamingo"
+#message = "[11:00:11] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) From 12054 to 2111Z Radio emmission were detected at location  27.689097938330395, -80.38238737940404 operating on VHF. in Lane Bellagio"
+#message = "[10:45:02] WF_Clark: Floater03_OPS (USS Cole DDG): @Maritime_OPS (Maritime Operations Center) Possible helos swarm approaching from south, type unk.  Main generator still inop, drifting WNW at 5 knots, req support in Lane Ceasars"
+#message = "TN:43773 Rank 1. Harpy 2. Gismo 3. Thor"
+#message = "afc_watch:  SINATRA DIRECTS attack bandit cttn 14754, tot asap pls"
+#message = "SINATRA DIRECTS bandit cttn 14754, tot asap pls"
+#message = "@hydro_Surv miami tracks appear to be fighters possibly j-15s"
 
-]
-Incoming = ["MISSILE", "ROCKET", "TORPEDO", "BOMB", "TORP", "CRUISE", "BALLISTIC","LAUNCHED", "LAUNCH", "FIRE", "ENGAGED",
-             "ANTI-SHIP MISSILE", "ASW", "AAM", "AGM", "A/S", "A/G", "A/A", "A/T", "A/D", "A/P", "A/L",
-               "SURFACE-TO-AIR", "CRUISE-MISSILE","CRUISE",
-    "BALLISTIC-MISSILE",
-    "ANTI-SHIP-MISSILE",
-    "ANTI-AIR-MISSILE",
-    "AIR-TO-GROUND-MISSILE",
-    "SURFACE-TO-AIR-MISSILE",
-    "SURFACE-TO-SURFACE-MISSILE",
-    "LAND-ATTACK-CRUISE-MISSILE",
-    "SUBMARINE-LAUNCHED-CRUISE-MISSILE",
-    "SUBMARINE-LAUNCHED-BALLISTIC-MISSILE",
-    "SUBMARINE-LAUNCHED-ANTI-SHIP-MISSILE",
-    "SUBMARINE-LAUNCHED-LAND-ATTACK-CRUISE-MISSILE"
-    "SUBMARINE-LAUNCHED-ANTI-AIR-MISSILE"
-    ]
+def get_db_connection():
+    conn = psycopg2.connect(
+        host="10.5.185.53",
+        dbname="shooca_db",
+        user="shooca",
+        password="shooca222",
+        port="5432"
+    )
+    return conn
 
-intel = ["RADIO", "EMISSION", "EMISSIONS", "BLUR", "AUTOCAT", "BEAM RIDER","CTTN","RADAR","NOISE","SIGNAL","JAMMING"]
-
-cyber = ["FORWARD LOOKUP", "REQUEST", "ALLIGATOR", "NETWORK", "TRAFFIC"]
-
-civilian = [
-    "CIVILIAN", "CIV", "NON-COMBATANT", "NON-HOSTILE", "HUMANITARIAN", "REFUGEE", "CIVILIAN-AREA", "HUMANITARIAN-MISSION", "COMMERCIAL", "COMMERCIAL-VESSEL", "COMMERCIAL-PLANE", "COMMERCIAL A/C"
-]
-enem = ["ENEMY", "HOSTILE", "THREAT", "TARGET","ADVERSARY", "OPFOR", "OPPOSITION", "FOE", "RIVAL", "AGGRESSOR", "ANTAGONIST", "BANDIT", "BOGEY"]
-
-rando = ["RANDOM", "UNKNOWN", "UNK", "UNIDENTIFIED", "UNCONFIRMED", "UNCERTAIN", "POTENTIAL"]
-out =["SWIM","BEER"]
-
-battle_effect_dict = {
-    "Attack":["Attack, Intercept", "Ambush", "Assail", "Assault", "Strike", "Hit", "Raid", "Invade", "Advance", "Shoot", "Suppress", "Disable"],
-    "Investigate":["Investigate", "Consider", "Examine", "Explore", "Inspect", "Interrogate", "Probe", "Question", "Review", "Search", "Study", "Inquire", "Research", "Faded", "Fade", "Shadow"],
-    "Communicate":["Communicate", "Broadcast", "Contact", "Convey", "Correspond", "Disclose", "Reach out", "Pass On", "Tell", "Transfer", "Transmit", "Discover", "Relay", "Report"],
-    "Destroy":["Destroy", "Kill", "Nullify", "Terminate", "Vanish"],
-    "Counter":["Counter", "Hinder", "Counteract", "Oppose", "Respond", "Retaliate"],
-    "Evade":["Evade", "Avoid", "Circumvent", "Conceal", "Elude", "Escape", "Fend Off", "Flee", "Hide"],
-    "Brace for Impact": ["Brace for Impact", "Prepare", "Fortify"],
-    "Jam":["Jam", "Block", "Bind", "Congest"],
-    "Hack":["Hack"],
-    "Counter":["Counter", "Hinder", "Counteract", "Oppose", "Respond", "Retaliate"],
-    "Psyop":["Psyop", "Propaganda"],
-    "Harass":["Harass", "Hassle", "Intimidate", "Torment", "Disturb"]
-}
-
-# message = "[10:48:58] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) 2x Torpedo were observed on EO/IR Imagery located on parking apron forward of aircraft hangers IVO 25.045310306035184, -77.464458773165 in Lane Flamingo"
-# message = "[11:00:11] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) From 1205Z to 2111Z Radio emmission were detected at location  27.689097938330395, -80.38238737940404 operating on VHF. in Lane Bellagio"
-# message = "[10:45:02] WF_Clark: Floater03_OPS (USS Cole DDG): @Maritime_OPS (Maritime Operations Center) Possible helos swarm approaching from south, type unk.  Main generator still inop, drifting WNW at 5 knots, req support in Lane Ceasars"
-# message = "[10:48:58] WF_Clark: Analysis_Center01 (Analysis Center): @Intel_Ops (Intelligence Operations Center) 2x J-16s were observed on EO/IR Imagery located on parking apron forward of aircraft hangers IVO 25.045310306035184, -77.464458773165 in Lane Flamingo"
-#message = "[11:22:33] WF_FYST: IntelOps: @ Hydro_MSO, TN 44993/94/95/96 are all 1x J-15 each track."
-# def get_description(words, index, max_words=5):
-#     description = ' '.join(words[index+1:index+max_words]) if index + max_words <= len(words) else ' '.join(words[index+1:])
+# discover possible battle effectors
 
 def action_prompt(entity, description=""):
-    if description:
-        print(f"  Description: {description}")
+    """
+    Check and see if the entity passed can be found in the "WORDS" lists, if so then retrieve the associated "ACTIONS" and return them
+    TO-DO: Review why is there a description parameter that we don't need
+    """
+    matched = extract_battle_effectors(message) 
+    #if description:
+    #    print(f"  Description: {description}")
 
-    for i in entity.split():
-        if i in air_enemy:
-            actions = ["Attack", "Investigate", "Communicate", "Destroy"]
-        elif i in Incoming:
-            actions = ["Counter", "Evade", "Brace for impact"]
-        elif i in surface:
-            actions = ["Attack", "Investigate", "Communicate"]
-        elif i in intel:
-            actions = ["Jam", "Communicate", "Investigate"]
-        elif i in cyber:
-            actions = ["Jam", "Hack", "Counter"]
-        elif i in civilian:
-            actions = ["Monitor", "Investigate", "Communicate"]
-        elif i in rando:
-            actions = ["Monitor", "Investigate", "Communicate"]
-        elif i in enem:
-            actions = ["Attack","Psyop","Harass"]
-        else:
-            actions = None, None, None
-        break
-    return actions
+
+    if matched !=[]:
+        #print(f"Battle Effectors: {matched}")
+        return matched, matched, matched
+    else:
+        i = entity.split()[0]
+        for k in WORDS.keys():
+            if i in WORDS[k]:
+                return ACTIONS[k]
+        
+    return None, None, None
+
 
 def get_description(words, index, max_words=4):
+    # Generates a description based on the entity and the words that follow it`
     description = ""
     # Check if the word before the current entity is present and does not contain a colon or closing parenthesis
     if index > 0 and (':' not in words[index - 1] and ')' not in words[index - 1]):
@@ -138,106 +77,148 @@ def get_description(words, index, max_words=4):
 
     return description.strip()
 
-def extracted_chat(message):
-    message_upper = message.upper()
+def tracking_number_information(tracking_number):
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Fetch information based on the tracking number
+        try:
+            cur.execute("SELECT * FROM bc3_with_all_vw WHERE tracknumber = %s", (tracking_number,))
+          
+        except Exception as e:
+            print("Tracking number not found in the database.")
+        result = cur.fetchone()
+        # If no results are found in the tracknumber query, try the bc3_jtn query
+        if result is None:
+            try:
+                cur.execute("SELECT * FROM bc3_with_all_vw WHERE bc3_jtn = %s", (tracking_number,))
+                result = cur.fetchone()
+            except Exception as e:
+                print("Tracking number not found in the database.")
+                return "Tracking number not found in the database."
+        cur.close()
+        conn.close()
+
+        if result:
+            call_sign = result[13]
+            type_of_entity = result[7] 
+            frnd_or_foe = result[8]
+            aircraft_type = result[18]
+            latty = result[1]
+            longy = result[2]
+            return call_sign,type_of_entity, frnd_or_foe, aircraft_type, latty, longy        
+    except Exception as e:
+        
+        return None, None, None, None, None, None
+
+def extract_five_digit_numbers(text):
+        # looks for 5 digit tracking numbers in the message 
+        pattern = r'\b(?:tn:?|TN:?|cttn:?|CTTN:?|tn?|TN?|)[\s-]*?(\d{5})\b'
+        return re.findall(pattern, text)
+
+def match_entity(filtered_s, words, index, category_lists, message):
+    # discover possible entity and actions
+    for label, category in BATTLE_DICTIONARY.items():
+        if filtered_s.upper() in category:
+            print(f"Match found {filtered_s}")
+            print(f"Battle Effect is: {label}")
+            tracking_number = extract_five_digit_numbers(message)
+            # CRITERIA 1 if tracking number and battle effect is found, then return that.
+            if tracking_number:
+                c_s,t_o_e,f_o_f,a_t, latty, longy = tracking_number_information(tracking_number[0])
+                entity = ", ".join(tracking_number) + f" (CallSign: {c_s}, Track Cat: {t_o_e}, Track ID: {f_o_f}, Aircraft Type: {a_t}, Lattitude: {latty}, Longitude: {longy})"
+                actions = label, label, label 
+                print(f'Confirmed tracking number - {tracking_number} and Battle Effect - {label}')
+            #CRITERIA 3 entity and battle effect is found, then return that.
+            else:
+                description = get_description(words, index)
+                print(f"description: {description}")
+                # entity = filtered_s + " " + description
+                entity = extract_entity_in_message(words)
+                print(f"entity: {entity}")
+                actions =  label, label, label
+                print(f'Confirmed entity - {entity} and Battle Effect - {label}')
+                extracted_entity = extract_entity_in_message(words) 
+                entity = " ".join(extracted_entity)+ " (" + description + ")"
+            
+            print("actions:")
+            print(f"1. {actions[0]}")
+            print(f"1. {actions[1]}")
+            print(f"1. {actions[2]}")
+            return entity, *actions[:3]
+    return None, None, None, None
+
+
+def extract_entity_in_message(words):
+    print("   EXTRACTING IN MESSAGE")
+    print(words)
+    for i in words:
+        for label, category in WORDS.items():
+                i = i.rstrip('s')
+                i = i.upper()
+                if i in category:
+                    print(f"{i} is {label}")
+                    return i, label
+    return None, None
+
+def extract_battle_effectors(message):
+    # Extracts words from text that match entries in the battle dictionary.
+    # Returns a list of matched keywords.
+
+    # Normalize the input text to lowercase and tokenize using regex to catch words and phrases
+    good_words = re.findall(r'\b\w[\w\-]*\b', message.upper())
+    matched = []
+    matched_cleaned = []
+    # Check for single-word matches
+    for word in good_words:
+        if word in battle_lookup:
+            matched.append(battle_lookup[word])
+            matched_cleaned = ''.join(matched)
+        return matched_cleaned 
     
-    # Find the positions of the second parenthesis ')'
+
+
+def extracted_chat(message):
+    # Extracts entity and actions from the message.
+    # Convert message to uppercase for case-insensitive matching
+    message_upper = message.upper()
+
+    # Find the first occurrence of a parenthesis and colon
     first_parenthesis_pos = message_upper.find(')')
     second_parenthesis_pos = message_upper.find(')', first_parenthesis_pos + 1)
-    
-    # Find the second colon ':'
     second_colon_pos = message_upper.find(':', message_upper.find(':') + 1)
-    
-    # If a second colon is found, start from that position
+
+    # Determine the starting position for text extraction
     if second_colon_pos != -1:
         start_pos = second_colon_pos + 1
     else:
-        start_pos = second_parenthesis_pos + 1 if second_parenthesis_pos != -1 else 0  # Fallback to second parenthesis position if no second colon
-    
-    # Extract the message text starting from the found position (after second colon or second parenthesis)
+        start_pos = second_parenthesis_pos + 1 if second_parenthesis_pos != -1 else 0
+
+    # Extract the text after the first parenthesis or colon
     text_to_process = message[start_pos:].strip()
-    
+    # create list of words from the text
     words = text_to_process.split()
 
-    found_air = []
-    found_intel = []
-    found_cyber = []
-    found_surface = []
-    found_civilian = []
-    found_defend = []
-    found_rando = []
-    found_enemy =[]
 
     for i, word in enumerate(words):
+        # filters out any characters that are not alphanumeric or hyphens, joins the remaining characters into a new string
         filtered_word = ''.join(e for e in word if e.isalnum() or e == '-').upper()
+        # remove all trailing 'S' from the filtered word (possibly remove in the future)
         filtered_s = filtered_word.rstrip('S')
-
-        if filtered_s in air_enemy:
-            found_air.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-
-        if filtered_s in Incoming:
-            found_defend.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-
-        elif filtered_s in surface:
-            found_surface.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-
-        elif filtered_s in intel:
-            found_intel.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-
-        elif filtered_s in cyber:
-            found_cyber.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-
-        elif filtered_s in civilian:
-            found_civilian.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-        
-        elif filtered_s in rando:
-            found_rando.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-        
-        elif filtered_s in enem:
-            found_enemy.append(filtered_s)
-            description = get_description(words, i)
-            filtered_s = filtered_s + " " + description
-            actions = action_prompt(filtered_s)
-            action1, action2, action3 = actions[:3]
-            return filtered_s, action1, action2, action3
-
-    
+        # Check if the filtered word is in the words dictionary
+        print(f"Working on word: {filtered_s} --------------------")
+        final_entity, act1, act2, act3 = match_entity(filtered_s,words, i, WORDS, message,)
+        print(f"End on work: {filtered_s} -----------------------")
+        if final_entity != None:
+           print(f"result true")
+           return final_entity, act1, act2, act3       
+        else:
+           print(f"Result false")
     return None, None, None, None
+
+
+
 
 # filtered_s, action1, action2, action3 = extracted_chat(message)
 # print(f"Entity: {filtered_s}")
