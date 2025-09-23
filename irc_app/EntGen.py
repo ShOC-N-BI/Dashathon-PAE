@@ -127,7 +127,7 @@ def match_entity(filtered_s, words, index, category_lists, message):
             # CRITERIA 1 if tracking number and battle effect is found, then return that.
             if tracking_number:
                 c_s,t_o_e,f_o_f,a_t, latty, longy = tracking_number_information(tracking_number[0])
-                entity = ", ".join(tracking_number) + f" (CallSign: {c_s}, Track Cat: {t_o_e}, Track ID: {f_o_f}, Aircraft Type: {a_t}, Lattitude: {latty}, Longitude: {longy})"
+                entity = ", ".join(tracking_number) + f" (CallSign: {c_s}, Track Cat: {t_o_e}, Track ID: {f_o_f}, Aircraft Type: {a_t}, Latitude: {latty}, Longitude: {longy})"
                 actions = label, label, label 
                 print(f'Confirmed tracking number - {tracking_number} and Battle Effect - {label}')
             #CRITERIA 3 entity and battle effect is found, then return that.
