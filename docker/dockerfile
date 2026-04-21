@@ -16,4 +16,4 @@ EXPOSE 8080
 
 # Run the application
 # -u forces the python stdout to be unbuffered, great for seeing logs in real-time
-CMD ["python", "-u", "DataResponse .py"]
+CMD ["python", "-m", "app.main"]

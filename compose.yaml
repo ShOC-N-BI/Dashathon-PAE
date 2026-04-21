@@ -1,8 +1,12 @@
 services:
-  app:
-    build: .
-
+  pae_app:
+    build:
+      context: .
+      dockerfile: docker/dockerfile
     ports:
       - "8080:8080"
-
-    # volumes:
+    volumes:
+      # Live code mounting
+      - ./app:/prod/app
+    env_file:
+      - .env
