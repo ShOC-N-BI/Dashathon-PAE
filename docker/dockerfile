@@ -10,7 +10,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 3. Now copy the rest of your application code
-COPY . .
+COPY app /app
+
+EXPOSE 8080
 
 # Run the application
 # -u forces the python stdout to be unbuffered, great for seeing logs in real-time
