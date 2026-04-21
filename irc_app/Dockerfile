@@ -1,12 +1,17 @@
-#python
-FROM python:3.9-slim
+FROM python:3.12-slim
 
+# Set the working directory
 WORKDIR /app
 
-#download pips requirements to container from working directry. 
-COPY . /app
-RUN pip install psycopg2-binary irc nc
-#copy files into container. if above installs pip requirements, what does is this copying??? 
+# 1. Copy ONLY the requirements file first
+COPY requirements.txt .
 
-#RUN app??? :) example suggests to port orward.
-CMD ["python", "-u", "/app/IRC.py"]
+# 2. Install dependencies (This layer is now cached!)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 3. Now copy the rest of your application code
+COPY . .
+
+# Run the application
+# -u forces the python stdout to be unbuffered, great for seeing logs in real-time
+CMD ["python", "-u", "DataResponse .py"]

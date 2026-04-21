@@ -5,10 +5,26 @@ intel = ["RADIO", "EMISSION", "EMISSIONS","BLUR","AUTOCAT","BEAM RIDER"]
 cyber = ["FORWARD LOOKUP", "REQUEST","ALLIGATOR","NETWORK","TRAFFIC"]
 # friendly =["ANGELS","ANYFACE","BIRD","BITTERSWEET","BLIND","BRUISER","BULLDOG","CHICK"]
 
+
+def get_messages():
+    from pathlib import Path
+    LOCAL_DIR = Path(__file__).resolve().parent
+    
+    # Use 'with' to ensure the file closes properly
+    try:
+        with open(LOCAL_DIR / "pae_data.csv", "r") as csv_file:
+            # strip() removes the \n at the end of lines
+            list_of_messages = [line.strip() for line in csv_file.readlines()]
+        return list_of_messages
+    except FileNotFoundError:
+        print("CSV file not found!")
+        return []
+
+
 # process message
 def extracted_chat(message):
     message = message.lower()
-
+  
     # Finds position of the second '(' character
     first_parenthesis_pos = message.find('(')
     second_parenthesis_pos = message.find('(', first_parenthesis_pos + 1)
@@ -50,5 +66,6 @@ def extracted_chat(message):
                 found_cyber.append(word)
 
         # Return the categorized lists
+        print (found_air, found_intel, found_cyber)
         return found_air, found_intel, found_cyber, #found_maritime
     return [], [], []#, []  # If none return empty list

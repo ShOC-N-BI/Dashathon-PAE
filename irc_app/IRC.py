@@ -56,8 +56,8 @@ class IRCBot(irc.bot.SingleServerIRCBot):
         print(f"JOIN {self.channel}")
 
     def on_disconnect(self, connection, event):
-        print("DISCONNECT")
-        sys.exit(0)
+        print(f"DISCONNECT EVENT: {event.arguments}") # This might give a reason (timeout, refused, etc.)
+        # sys.exit(0)  <-- Comment this out temporarily!
 
     def on_pubmsg(self, connection, event):
         # Capture the IRC message
