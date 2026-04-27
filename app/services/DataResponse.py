@@ -7,19 +7,21 @@ cyber = ["FORWARD LOOKUP", "REQUEST","ALLIGATOR","NETWORK","TRAFFIC"]
 
 
 def get_messages():
-    from pathlib import Path
-    LOCAL_DIR = Path(__file__).resolve().parent
+    import os
+    # This path is relative to the root of your container (/app)
+    csv_path = "/app/app/assets/pae_data.csv"
     
-    # Use 'with' to ensure the file closes properly
-    try:
-        with open(LOCAL_DIR / "pae_data.csv", "r") as csv_file:
-            # strip() removes the \n at the end of lines
-            list_of_messages = [line.strip() for line in csv_file.readlines()]
-        return list_of_messages
-    except FileNotFoundError:
-        print("CSV file not found!")
+    list_of_messages = []
+    
+    if not os.path.exists(csv_path):
+        print(f"ERROR: CSV not found at {csv_path}")
         return []
 
+    with open(csv_path, "r") as csv_file:
+        # strip() ensures we don't get messy \n characters
+        list_of_messages = [line.strip() for line in csv_file.readlines() if line.strip()]
+    
+    return list_of_messages
 
 # process message
 def extracted_chat(message):

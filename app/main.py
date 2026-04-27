@@ -27,4 +27,4 @@ def render_page(pathname):
     return html.H2("404 - Page not found")
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8070)
+    app.run(debug=False, host="0.0.0.0", port=8080)

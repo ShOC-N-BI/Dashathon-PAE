@@ -2,7 +2,7 @@ services:
   pae_app:
     build:
       context: .
-      dockerfile: docker/dockerfile
+      dockerfile: irc_app/Dockerfile
     ports:
       - "8080:8080"
     volumes:
