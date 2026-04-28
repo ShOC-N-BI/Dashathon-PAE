@@ -22,26 +22,20 @@ def get_db_connection():
     return conn
 
 # Function to insert message into PostgreSQL
+# In your IRC script, ensure the table has a serial ID or timestamp
 def insert_message(message, entity, action1, action2, action3):
     try: 
-        print("Begin inserting message")
         conn = get_db_connection()
         cur = conn.cursor()
-        # cur.execute("INSERT INTO pae_data (message) VALUES (%s)", (message,))
-        print("Main message inserted")
-        # future input 
-        print(entity)
-        print(action1)
-        print(action2)
-        print(action3)
-        print(message)
-        cur.execute("INSERT INTO pae_data (entity, action1, action2, action3, message) VALUES (%s, %s, %s, %s, %s)", (entity, action1, action2, action3, message,))
+        # Added 'created_at' if your schema allows, otherwise just stick to your columns
+        query = "INSERT INTO pae_data (entity, action1, action2, action3, message) VALUES (%s, %s, %s, %s, %s)"
+        cur.execute(query, (entity, action1, action2, action3, message))
         conn.commit()
         cur.close()
         conn.close()
-        print(f"Message inserted into DB: {message}")
-    except:
-        print("Message insert fail 1")
+        print(f"Message synced to DB: {message[:30]}...")
+    except Exception as e:
+        print(f"DB Insert Fail: {e}")
 
 class IRCBot(irc.bot.SingleServerIRCBot):
     def __init__(self, channel, nickname, server="10.5.185.72", port=6667):
