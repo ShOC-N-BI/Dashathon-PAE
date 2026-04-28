@@ -7,3 +7,6 @@ sqlalchemy==2.0.47
 psycopg2-binary 
 irc 
 nc
+httpx
+pydantic
+pydantic-settings

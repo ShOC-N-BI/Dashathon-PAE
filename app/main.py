@@ -1,30 +1,39 @@
-# Main
 # app/main.py
 
+from pathlib import Path
 import dash
-from dash import html, dcc, Input, Output, callback
+import dash_bootstrap_components as dbc
 
-from app.ui.landing_page import layout as landing_layout
-
-app = dash.Dash(__name__, title=" GBC", suppress_callback_exceptions=True)
-
-app.layout = html.Div(className = "app-wrapper", children = [
-    dcc.Location(id="url"),
-    html.Div(id="page-content"),
-])
-
-# ---- ROUTER ----
-@callback(
-    Output("page-content", "children"),
-    Input("url", "pathname")
+app = dash.Dash(
+    __name__,
+    use_pages=True,
+    pages_folder=str(Path(__file__).parent / "ui"),
+    external_stylesheets=[dbc.themes.BOOTSTRAP],
 )
-def render_page(pathname):
-    print("Router called: " + pathname)
 
-    if pathname == "/":
-        return landing_layout()
+# ── Import pages AFTER app is instantiated ─────────────────────────────────
+from ui import pae_test  # noqa: F401, E402
 
-    return html.H2("404 - Page not found")
+# ── Layout ─────────────────────────────────────────────────────────────────
+app.layout = dbc.Container(
+    [
+        dbc.NavbarSimple(
+            children=[
+                dbc.NavItem(dbc.NavLink("PAE Test", href="/pae-test"))
+            ],
+            brand="Dashathon",
+            color="primary",
+            dark=True,
+            className="mb-3",
+        ),
+        dash.page_container,
+    ],
+    fluid=True,
+)
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8070)
+    print("\n── Registered pages ──")
+    for page in dash.page_registry.values():
+        print(f"  {page['name']} → {page['path']}")
+    print("─────────────────────\n")
+    app.run(debug=True, port=8050)
