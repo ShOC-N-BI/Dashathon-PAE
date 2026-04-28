@@ -1,10 +1,10 @@
 FROM python:3.12-slim
 
 # Set the working directory
-WORKDIR /app
+WORKDIR .
 
 # 1. Copy ONLY the requirements file first
-COPY requirements.txt .
+COPY docker/requirements.txt .
 
 # 2. Install dependencies (This layer is now cached!)
 RUN pip install --no-cache-dir -r requirements.txt
