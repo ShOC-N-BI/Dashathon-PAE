@@ -2,7 +2,7 @@ import irc.bot
 import sys
 import psycopg2
 # from DataResponse import extracted_chat
-from EntGen import extracted_chat
+
 
 
 # Track number,e1.category, e1.trackId, e12.callsign
@@ -56,20 +56,14 @@ class IRCBot(irc.bot.SingleServerIRCBot):
         print(f"JOIN {self.channel}")
 
     def on_disconnect(self, connection, event):
-        print(f"DISCONNECT EVENT: {event.arguments}") # This might give a reason (timeout, refused, etc.)
-        # sys.exit(0)  <-- Comment this out temporarily!
+        print("DISCONNECT")
+        sys.exit(0)
 
     def on_pubmsg(self, connection, event):
         # Capture the IRC message
         message = event.arguments[0]
         print(f"Received message: {message}")
-        try:
-            found_entity, action1, action2, action3 = extracted_chat(message)
-            if found_entity is not None:
-                print('Entity found')
-                insert_message(message, found_entity, action1, action2, action3)
-        except:
-            print("bad input")
+
         
         # Insert message into PostgreSQL
         
@@ -78,8 +72,7 @@ class IRCBot(irc.bot.SingleServerIRCBot):
         
 
 def start_irc_bot():
-    bot = IRCBot('#tm_c2_coord', 'D_Bot')
-    # bot = IRCBot("#app_dev", "CD_Bot")
+    bot = IRCBot("#app_dev", "Skibby_Mendoza")
     print("IRC listener starting...")
     bot.start()
 
