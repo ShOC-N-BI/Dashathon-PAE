@@ -22,15 +22,19 @@ unit testing of each concern independently.
 
 import asyncio
 import json
+import logging
 import sys
 import os
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+import httpx
 from app.schemas.pae_schemas import PaeOutput, PaeInput, PaeInputCreated
+from app.config.settings import settings
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+log = logging.getLogger(__name__)
 app = FastAPI(title="PAE Emulator", version="1.0.0")
 
 # ── SSE subscriber registry ────────────────────────────────────────────────
@@ -141,18 +145,50 @@ def get_pae(pae_id: str):
 
 
 @app.post("/paeoutputs", response_model=PaeOutput, status_code=201)
-def submit_pae(pae: PaeOutput):
+async def submit_pae(pae: PaeOutput):
     if pae.id is None:
         pae.id = f"pae-{len(_pae_store) + 1:03d}"
     _pae_store[pae.id] = _to_store(pae)
+    log.info("PAE emulator stored paeOutput id=%s", pae.id)
+ 
+    if settings.ENVIRONMENT == "local":
+        envelope = {"paeOutput": _pae_store[pae.id]}
+        async with httpx.AsyncClient() as client:
+            try:
+                log.info("PAE emulator forwarding to %s/mefinput", settings.MEF_BASE_URL)
+                r = await client.post(
+                    f"{settings.MEF_BASE_URL}/mefinput",
+                    json=envelope,
+                    timeout=5.0,
+                )
+                log.info("MEF forward response: %s", r.status_code)
+            except Exception as exc:
+                log.error("PAE emulator failed to forward to MEF: %s", exc)
+ 
     return _pae_store[pae.id]
-
-
+ 
+ 
 @app.put("/paeoutputs/{pae_id}", response_model=PaeOutput)
-def update_pae(pae_id: str, pae: PaeOutput):
+async def update_pae(pae_id: str, pae: PaeOutput):
     if pae_id not in _pae_store:
         raise HTTPException(status_code=404, detail=f"PAE {pae_id} not found")
     _pae_store[pae_id] = _to_store(pae)
+    log.info("PAE emulator updated paeOutput id=%s", pae_id)
+ 
+    if settings.ENVIRONMENT == "local":
+        envelope = {"paeOutput": _pae_store[pae_id]}
+        async with httpx.AsyncClient() as client:
+            try:
+                log.info("PAE emulator forwarding to %s/mefinput", settings.MEF_BASE_URL)
+                r = await client.post(
+                    f"{settings.MEF_BASE_URL}/mefinput",
+                    json=envelope,
+                    timeout=5.0,
+                )
+                log.info("MEF forward response: %s", r.status_code)
+            except Exception as exc:
+                log.error("PAE emulator failed to forward to MEF: %s", exc)
+ 
     return _pae_store[pae_id]
 
 
@@ -224,3 +260,30 @@ async def paeinputs_sse(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── MEF forwarding endpoint ────────────────────────────────────────────────
+# This endpoint is for testing only — in production the real orchestrator handles
+# this routing internally.  In the emulator we forward explicitly so the two
+# services remain independent — PAE only talks to port 3016, MEF only talks to port 3027.
+
+@app.post("/mefinput", status_code=201)
+async def forward_to_mef(request: Request):
+    """
+    Receives a PaeOutputCreatedOrUpdated envelope from the PAE microservice
+    and forwards it to the MEF emulator on MEF_BASE_URL.
+
+    In production the real orchestrator handles this routing internally.
+    In the emulator we forward explicitly so the two services remain
+    independent — PAE only talks to port 3016, MEF only talks to port 3027.
+    """
+    body = await request.json()
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{settings.MEF_BASE_URL}/mefinput",
+            json=body,
+            headers={"Content-Type": "application/json"},
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        return r.json()

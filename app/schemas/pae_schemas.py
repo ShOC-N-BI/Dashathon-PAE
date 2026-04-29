@@ -30,7 +30,7 @@ class PaeEffect(BaseModel):
 
 
 class PaeOutput(BaseModel):
-    id:                   str
+    id:                   Optional[str]        = None
     label:                str
     description:          str
     request_id:           str                  = Field(alias="requestId")

@@ -1,9 +1,13 @@
+import json
 import logging
+import uuid
+from datetime import datetime, timezone
 
-from schemas.pae_schemas import PaeOutput, PaeInput, PaeInputCreated
 from config.settings import settings
+from schemas.pae_schemas import PaeOutput, PaeInput, PaeInputCreated, PaeEffect
 import client.pae_output_client as output_client
 import client.pae_input_client  as input_client
+from client.http_client import get_http_client
 
 log = logging.getLogger(__name__)
 
@@ -12,18 +16,13 @@ log = logging.getLogger(__name__)
 
 def on_pae_input_created(event: PaeInputCreated) -> None:
     """
-    Called by PaeSseClient whenever a PaeInputCreated event arrives on the
-    /paeinputs-sse stream.
- 
-    The SSE event IS the trigger — this handler acknowledges receipt and
-    hands off to downstream processing (e.g. generating a PaeOutput).
-    It must NOT call retrigger_pae, which POSTs back to /paeinputs on the
-    same orchestrator, causing the orchestrator to re-broadcast the SSE
-    event and loop indefinitely regardless of environment.
- 
-    retrigger_pae exists for a different scenario: when the PAE service
-    itself needs to initiate a brand-new request to the orchestrator,
-    not in response to an inbound SSE event.
+    Called by PaeSseClient whenever a PaeInputCreated event arrives.
+
+    Flow:
+      1. Generate a PaeOutput from the incoming PaeInput
+      2. POST the PaeOutput to the orchestrator (/paeoutputs)
+      3. POST the PaeOutput to the orchestrator's /mefinput so the
+         orchestrator can notify MEF — PAE does not call MEF directly.
     """
     pae_in = event.pae_input
     log.info(
@@ -33,34 +32,77 @@ def on_pae_input_created(event: PaeInputCreated) -> None:
         pae_in.gbc_id,
         pae_in.originator,
     )
- 
-    # ── Downstream processing goes here ───────────────────────────────────
-    def generate_pae_output(pae_in: PaeInput) -> PaeOutput:
-        from datetime import datetime, timezone
-        return PaeOutput(
-            id=f"pae-{pae_in.request_id}",
-            label="Auto-generated from SSE trigger",
-            description=f"Generated for requestId={pae_in.request_id}",
-            requestId=pae_in.request_id,
-            gbcId=pae_in.gbc_id,
-            entitiesOfInterest=[pae_in.track_id] if pae_in.track_id else [],
-            battleEntity=[],
-            battleEffects=[],
-            chat=[],
-            isDone=False,
-            originator=pae_in.originator,
-            lastUpdated=datetime.now(timezone.utc),
+
+    try:
+        # Step 1 — generate output
+        result = generate_pae_output(pae_in)
+
+        # Step 2 — submit to orchestrator
+        submitted = output_client.submit(result)
+        log.info(
+            "PaeOutput submitted to orchestrator — id=%s  requestId=%s",
+            submitted.id,
+            submitted.request_id,
+        )
+
+        # Step 3 — notify orchestrator's /mefinput with the PaeOutput
+        # NOTE: IN Production, the following will be ignored.  This is for testing only.
+        if settings.ENVIRONMENT == "local":
+            envelope = {
+                "paeOutput": json.loads(
+                    submitted.model_dump_json(by_alias=True, exclude_none=True)
+                )
+            }
+            with get_http_client() as http:
+                r = http.post("/mefinput", json=envelope)
+                r.raise_for_status()
+                log.info(
+                    "PaeOutput forwarded to /mefinput — paeOutputId=%s",
+                    submitted.id,
+                )
+
+    except Exception as exc:
+        log.error("Error processing PaeInputCreated: %s", exc)
+
+
+# ── PaeOutput generator (stub) ─────────────────────────────────────────────
+
+def generate_pae_output(pae_in: PaeInput) -> PaeOutput:
+    """
+    Stub implementation — builds a minimal valid PaeOutput from a PaeInput.
+    Replace the body of this function with real logic as the project matures.
+    The function signature and return type should stay the same.
+    """
+    effect_id = str(uuid.uuid4())[:8]
+    return PaeOutput(
+        id=None,  # orchestrator assigns the ID on POST
+        label="Auto-generated from SSE trigger",
+        description=f"PaeOutput generated for requestId={pae_in.request_id}",
+        requestId=pae_in.request_id,
+        gbcId=pae_in.gbc_id,
+        entitiesOfInterest=[pae_in.track_id] if pae_in.track_id else [],
+        battleEntity=[],
+        battleEffects=[
+            PaeEffect(
+                id=effect_id,
+                effectOperator="Pending",
+                description="Effect to be determined by mission planning.",
+                timeWindow="TBD",
+                stateHypothesis="Awaiting analysis.",
+                opsLimits=[],
+                goalContributions=[],
+                recommended=False,
+                ranking=None,
+            )
+        ],
+        chat=[f"Auto-generated from SSE trigger — requestId={pae_in.request_id}"],
+        isDone=False,
+        originator=pae_in.originator,
+        lastUpdated=datetime.now(timezone.utc),
     )
 
-    # The event has been received once. Add logic to act on it, such as:
-    # result = generate_pae_output(pae_in)
-    # output_client.submit(result)
-    
-    log.info(
-        "PAE input acknowledged — ready for downstream processing  requestId=%s",
-        pae_in.request_id,
-    )
 
+# ── REST service functions ─────────────────────────────────────────────────
 
 def fetch_all_pae() -> list[PaeOutput]:
     return output_client.get_all()

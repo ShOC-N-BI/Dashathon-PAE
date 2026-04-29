@@ -25,7 +25,7 @@ import asyncio
 import json
 import sys
 import os
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from app.schemas.pae_schemas import PaeInput, PaeInputCreated
 
