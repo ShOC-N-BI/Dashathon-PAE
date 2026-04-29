@@ -40,36 +40,42 @@ def start_translator():
         irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         irc.connect((SERVER, PORT))
         
-        irc.send(b"CAP LS 302\r\n")
+        # 1. Registration Phase
         irc.send(f"NICK {NICKNAME}\r\n".encode())
         irc.send(f"USER {NICKNAME} 8 * :ABM_JSON_Engine\r\n".encode())
         
-        print(f"--- 📡 TACTICAL FILTER ACTIVE: {CHANNEL} ---")
+        print(f"--- 📡 CONNECTING TO {SERVER}... ---")
 
+        registered = False
         while True:
             data = irc.recv(4096).decode("utf-8", errors="ignore")
             
             for line in data.split("\r\n"):
                 if not line: continue
                 
+                # LOG SERVER TRAFFIC: This will show you exactly why it fails
+                print(f"📡 SERVER: {line}")
+
                 # Keep server connection alive
                 if line.startswith("PING"):
                     irc.send(f"PONG {line.split()[1]}\r\n".encode())
                     continue
+                
+                # 2. Wait for the '001 Welcome' signal before joining
+                if " 001 " in line and not registered:
+                    print(f"✅ WELCOME RECEIVED. JOINING {CHANNEL}...")
+                    irc.send(f"JOIN {CHANNEL}\r\n".encode())
+                    registered = True
+                    continue
 
-                # STRICT CHECK: Only process lines that are actual user messages
-                # A real message looks like: :Nick!User@Host PRIVMSG #channel :message
+                # 3. Only process messages if we are officially in
                 if " PRIVMSG " in line:
                     parts = line.split(":", 2)
                     if len(parts) >= 3:
-                        # Extract the message content (the part after the second colon)
                         msg_content = parts[2]
-                        # Extract the username
                         user = parts[1].split("!")[0] if "!" in parts[1] else "Unknown"
 
-                        # Apply your "Ironclad" Filter
                         if is_clean(msg_content):
-                            # We wrap the dict in a list [] as per your requirement
                             tactical_json = [{
                                 "id": "rhino",
                                 "requestId": f"track-{uuid.uuid4().hex[:6]}",
@@ -85,19 +91,8 @@ def start_translator():
                                         "description": None,
                                         "timeWindow": None,
                                         "stateHypothesis": None,
-                                        "opsLimits": [
-                                            {
-                                                "description": None,
-                                                "battleEntity": None,
-                                                "stateHypothesis": None
-                                            }
-                                        ],
-                                        "goalContributions": [
-                                            {
-                                                "battleGoal": None,
-                                                "effect": None
-                                            }
-                                        ],
+                                        "opsLimits": [{"description": None, "battleEntity": None, "stateHypothesis": None}],
+                                        "goalContributions": [{"battleGoal": None, "effect": None}],
                                         "recommended": True,
                                         "ranking": 1
                                     },
@@ -107,19 +102,8 @@ def start_translator():
                                         "description": None,
                                         "timeWindow": None,
                                         "stateHypothesis": None,
-                                        "opsLimits": [
-                                            {
-                                                "description": None,
-                                                "battleEntity": None,
-                                                "stateHypothesis": None
-                                            }
-                                        ],
-                                        "goalContributions": [
-                                            {
-                                                "battleGoal": None,
-                                                "effect": None
-                                            }
-                                        ],
+                                        "opsLimits": [{"description": None, "battleEntity": None, "stateHypothesis": None}],
+                                        "goalContributions": [{"battleGoal": None, "effect": None}],
                                         "recommended": False,
                                         "ranking": 2
                                     },
@@ -129,19 +113,8 @@ def start_translator():
                                         "description": None,
                                         "timeWindow": None,
                                         "stateHypothesis": None,
-                                        "opsLimits": [
-                                            {
-                                                "description": None,
-                                                "battleEntity": None,
-                                                "stateHypothesis": None
-                                            }
-                                        ],
-                                        "goalContributions": [
-                                            {
-                                                "battleGoal": None,
-                                                "effect": None
-                                            }
-                                        ],
+                                        "opsLimits": [{"description": None, "battleEntity": None, "stateHypothesis": None}],
+                                        "goalContributions": [{"battleGoal": None, "effect": None}],
                                         "recommended": False,
                                         "ranking": 3
                                     }
@@ -151,15 +124,15 @@ def start_translator():
                                     "PAE generated for pre-emptive and defensive options."
                                 ],
                                 "isDone": False,
-                                "originator": "rhino",
+                                "originator": user, # Changed from "rhino" to dynamic user
                                 "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
                             }]
 
-                            # Output to terminal
                             print(f"\n✅ FULL SCHEMA GENERATED FOR: {user}")
                             print(json.dumps(tactical_json, indent=4))
                         else:
                             print(f"🗑️ NOISE FILTERED: '{msg_content}'")
+
     except Exception as e:
         print(f"❌ CRITICAL ERROR: {e}")
 

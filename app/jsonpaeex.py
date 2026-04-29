@@ -1,28 +1,28 @@
 [
   {
-    "id": # unique ID ,
-    "requestId": # ID of the original message,
-    "label": # concise title,
-    "description": # summarize the message,
-    "gbcId": null,
+    "id": "pae-002",
+    "requestId": "0101-12 d",
+    "label": "Imminent Ballistic Missile Launch",
+    "description": "Multiple sensors have detected preparations for a TBM Type 1 launch from a known enemy site (Target PB1.2).",
+    "gbcId": None,
     "entitiesOfInterest": [
-      # which keyword was detected
+      "TGT-TBM-001"
     ],
     "battleEntity": [
-      # what is the enemy
+      "TBM Type 1"
     ],
     "battleEffects": [
       {
         "id": "pae-002-e01",
-        "effectOperator": # one of three battle effects chosen from the list of available,
-        "description": # summarize why that effect was chosen,
-        "timeWindow": # how fast would this take place,
-        "stateHypothesis": # summarize what would happen if this effect was chosen,
+        "effectOperator": "Destroy",
+        "description": "Strike the launch bunker entrance pre-emptively with precision-guided munitions.",
+        "timeWindow": "Pre-emptive",
+        "stateHypothesis": "The launch facility will be destroyed, preventing the missile from being launched.",
         "opsLimits": [
           {
             "description": "Target coordinates must be CAT 1.",
-            "battleEntity": # what kind of asset can conduct this effect,
-            "stateHypothesis": # any limitations that may occur
+            "battleEntity": "Stealth Bomber",
+            "stateHypothesis": "Assumes the TBM is still on the ground at the time of impact."
           }
         ],
         "goalContributions": [
@@ -31,20 +31,20 @@
             "effect": "high"
           }
         ],
-        "recommended": true,
+        "recommended": True,
         "ranking": 1
       },
       {
         "id": "pae-002-e02",
-        "effectOperator": # one of three battle effects chosen from the list of available,
-        "description": # summarize why that effect was chosen,
-        "timeWindow": # how fast would this take place,
-        "stateHypothesis": # summarize what would happen if this effect was chosen,
+        "effectOperator": "Intercept",
+        "description": "Intercept the incoming ballistic missile post-launch using a ballistic missile defense system.",
+        "timeWindow": "Boost/Midcourse Phase",
+        "stateHypothesis": "The enemy ballistic missile will be destroyed before reaching its intended target.",
         "opsLimits": [
           {
             "description": "BMD system must have a clear track and be within engagement range.",
-            "battleEntity": # what kind of asset can conduct this effect,
-            "stateHypothesis": # any limitations that may occur
+            "battleEntity": "BMD System",
+            "stateHypothesis": "Requires cueing from upstream sensors for initial track."
           }
         ],
         "goalContributions": [
@@ -53,20 +53,20 @@
             "effect": "high"
           }
         ],
-        "recommended": false,
+        "recommended": False,
         "ranking": 2
       },
       {
         "id": "pae-002-e03",
-        "effectOperator": # one of three battle effects chosen from the list of available,
-        "description":# summarize why that effect was chosen,
-        "timeWindow": # how fast would this take place,
-        "stateHypothesis": # summarize what would happen if this effect was chosen,
+        "effectOperator": "Suppress",
+        "description": "Disrupt the command-and-control communications link for the TBM launch sequence.",
+        "timeWindow": "Immediate",
+        "stateHypothesis": "The enemy's ability to issue the final launch command will be disrupted.",
         "opsLimits": [
           {
             "description": "Jamming asset must be on station and targeting the correct frequency range.",
-            "battleEntity": # what kind of asset can conduct this effect,
-            "stateHypothesis": # any limitations that may occur
+            "battleEntity": "Electronic Attack Aircraft",
+            "stateHypothesis": "Assumes launch sequence is dependent on a remote C2 link."
           }
         ],
         "goalContributions": [
@@ -75,17 +75,17 @@
             "effect": "medium"
           }
         ],
-        "recommended": false,
+        "recommended": False,
         "ranking": 3
       }
     ],
     "chat": [
-      # the original message 
+      "AMTI SAT has detected activity consistent with TBM launch preparations at PB1.2.",
       "PAE generated for pre-emptive and defensive options."
     ],
-    "isDone": false,
-    "originator": # who sent this message in the chat,
-    "lastUpdated": "2026-04-20T17:41:10.264328+00:00" # format for when message was received
+    "isDone": False,
+    "originator": "AFRL",
+    "lastUpdated": "2026-04-20T17:41:10.264328+00:00"
   }
 ]
  
