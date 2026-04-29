@@ -10,7 +10,7 @@ def retrigger(pae_input: PaeInput) -> dict:
         )
         r.raise_for_status()
         return r.json()
-    
+
 
 def submit_pae_input(pae_input_created: PaeInputCreated) -> dict:
     with get_http_client() as http:

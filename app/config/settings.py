@@ -1,11 +1,11 @@
 from pydantic_settings import BaseSettings
 from pathlib import Path
 
-# resolves to Dashathon-/.env no matter where main.py runs from
+# resolves to Dashathon-PAE/.env no matter where main.py runs from
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 class Settings(BaseSettings):
-    ENVIRONMENT:           str = "local"
+    ENVIRONMENT:           str = "production"
     ORCHESTRATOR_BASE_URL: str = "http://127.0.0.1:3016"
     ORCHESTRATOR_API_KEY:  str = "dev-key"
 

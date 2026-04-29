@@ -1,6 +1,9 @@
 import json
+import queue as thread_queue
+from datetime import datetime, timezone
 from dash import dcc, html, callback, Input, Output, State, register_page
 import dash_bootstrap_components as dbc
+from config.settings import settings
 from api.pae_api import (
     fetch_all_pae,
     fetch_pae_by_id,
@@ -9,6 +12,11 @@ from api.pae_api import (
     submit_pae_input_created,
 )
 from schemas.pae_schemas import PaeOutput
+
+# Re-use the single SSE connection that main.py already started via
+# PaeSseClient.  The UI drains the same queue the microservice logic uses,
+# so there is exactly one persistent connection to /paeinputs-sse.
+from client.pae_sse_client import PaeSseClient
 
 register_page(__name__, path="/pae-test", name="PAE Test")
 
@@ -52,10 +60,10 @@ DEFAULT_PAE_OUTPUT = json.dumps(
 DEFAULT_PAE_INPUT = json.dumps(
     {
         "paeInput": {
-            "requestId":  "0101-13",
-            "originator": "rhino",
-            "gbcId":      None,
-            "trackId":    "TGT-AD-001",
+            "gbcId":      "gbc-002-e03-3",
+            "requestId":  "0101-12",
+            "trackId":    "6",
+            "originator": "AFRL",
         }
     },
     indent=2,
@@ -67,12 +75,12 @@ DEFAULT_UPDATE_ID = "pae-002"
 # ── Helpers ────────────────────────────────────────────────────────────────
 def _pre_style(height: int) -> dict:
     return {
-        "height":        f"{height}px",
-        "overflowY":     "auto",
-        "background":    "var(--bs-light)",
-        "padding":       "12px",
-        "borderRadius":  "4px",
-        "fontSize":      "13px",
+        "height":       f"{height}px",
+        "overflowY":    "auto",
+        "background":   "var(--bs-light)",
+        "padding":      "12px",
+        "borderRadius": "4px",
+        "fontSize":     "13px",
     }
 
 
@@ -111,6 +119,12 @@ def _editor_row(
 layout = dbc.Container(
     [
         html.H4("PAE — API Test Page", className="my-3"),
+
+        # Interval fires every second to drain the SSE queue into the live log
+        dcc.Interval(id="pae-sse-interval", interval=1000, n_intervals=0),
+        # Store holds the accumulated log entries
+        dcc.Store(id="pae-sse-store", data=[]),
+
         dbc.Tabs(
             [
                 # GET all
@@ -206,6 +220,43 @@ layout = dbc.Container(
                         className="mt-2",
                     ),
                     label="POST input",
+                ),
+
+                # SSE Live Feed
+                dbc.Tab(
+                    dbc.Card(
+                        dbc.CardBody([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Div(id="pae-sse-status-badge", className="mb-2"),
+                                    html.Small(
+                                        f"Listening on {settings.ORCHESTRATOR_BASE_URL}/paeinputs-sse",
+                                        className="text-muted",
+                                    ),
+                                ], width=8),
+                                dbc.Col([
+                                    dbc.Button(
+                                        "Clear log",
+                                        id="pae-sse-clear-btn",
+                                        color="secondary",
+                                        outline=True,
+                                        size="sm",
+                                        className="float-end",
+                                    ),
+                                ], width=4),
+                            ], className="mb-2"),
+                            html.Pre(
+                                id="pae-sse-log",
+                                style={
+                                    **_pre_style(420),
+                                    "whiteSpace": "pre-wrap",
+                                    "wordBreak":  "break-all",
+                                },
+                            ),
+                        ]),
+                        className="mt-2",
+                    ),
+                    label="SSE Live Feed",
                 ),
             ]
         ),
@@ -347,3 +398,68 @@ def post_pae_input(_, payload_str):
         return f"Invalid JSON:\n{e}", dbc.Badge("Invalid JSON", color="danger")
     except Exception as e:
         return f"Error:\n{e}", dbc.Badge("Error", color="danger")
+
+
+# ── SSE live-feed callbacks ────────────────────────────────────────────────
+
+@callback(
+    Output("pae-sse-store",        "data"),
+    Output("pae-sse-status-badge", "children"),
+    Input("pae-sse-interval",      "n_intervals"),
+    State("pae-sse-store",         "data"),
+    prevent_initial_call=False,
+)
+def drain_sse_queue(_, existing_lines: list[str]):
+    new_lines: list[str] = []
+    while not PaeSseClient._ui_queue.empty():
+        try:
+            item       = PaeSseClient._ui_queue.get_nowait()
+            event_name = item.get("event", "unknown")
+            data       = item.get("data", {})
+            ts         = datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+            if event_name == "PaeInputCreated" and isinstance(data, dict):
+                pae_in     = data.get("paeInput", data)
+                request_id = pae_in.get("requestId", "?")
+                track_id   = pae_in.get("trackId",   "?")
+                originator = pae_in.get("originator", "?")
+                summary    = f"requestId={request_id}  trackId={track_id}  originator={originator}"
+            else:
+                summary = ""
+
+            header = f"── {ts}  event={event_name}" + (f"  {summary}" if summary else "") + " ──"
+            new_lines.append(header + "\n" + json.dumps(data, indent=2))
+
+        except thread_queue.Empty:
+            break
+
+    updated = new_lines + (existing_lines or [])
+    updated = updated[:100]
+
+    if PaeSseClient._status["connected"]:
+        badge = dbc.Badge("● Connected", color="success")
+    elif PaeSseClient._status["error"]:
+        badge = dbc.Badge(f"✕ {PaeSseClient._status['error'][:60]}", color="danger")
+    else:
+        badge = dbc.Badge("○ Connecting…", color="warning")
+
+    return updated, badge
+
+
+@callback(
+    Output("pae-sse-log", "children"),
+    Input("pae-sse-store", "data"),
+)
+def render_sse_log(lines: list[str]):
+    if not lines:
+        return "Waiting for events…"
+    return "\n\n".join(lines)
+
+
+@callback(
+    Output("pae-sse-store",    "data",    allow_duplicate=True),
+    Input("pae-sse-clear-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def clear_sse_log(_):
+    return []
