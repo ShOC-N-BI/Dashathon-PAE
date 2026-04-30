@@ -111,7 +111,10 @@ RULES:
 6. battleEntity: the vehicle or actor types involved (e.g. "TBM", "SAT", "F-16").
 7. timeWindow: your best estimate of urgency (e.g. "0-5m", "5-15m", "15-30m").
 8. stateHypothesis: the tactical outcome if this effect is enacted.
-9. Return ONLY valid JSON — no explanation, no markdown, no preamble.
+9. opsLimits MUST always include ALL THREE fields: "description", "battleEntity", and "stateHypothesis".
+   "battleEntity" inside opsLimits is the specific vehicle or asset required for that effect (e.g. "EA-18G", "F-16", "Analyst").
+   NEVER omit "battleEntity" from opsLimits. It is a required field.
+10. Return ONLY valid JSON — no explanation, no markdown, no preamble.
 
 APPROVED VERB LIST:
 {verb_list}
@@ -317,11 +320,29 @@ def get_battle_assessment(
 
         parsed = json.loads(raw)
 
-        # Validate all three effectOperator values
+        # Validate effectOperator verbs and ensure opsLimits are fully populated
         effects = parsed.get("battleEffects", [])
         for effect in effects:
+            # Validate verb
             v = effect.get("effectOperator", "").upper().strip()
             effect["effectOperator"] = v if v in ALL_VERBS else "NO PAE ACTION REQUIRED"
+
+            # Ensure opsLimits exists and every entry has the required battleEntity field
+            ops = effect.get("opsLimits", [])
+            if not ops:
+                effect["opsLimits"] = [{
+                    "description": "No specific operational constraint identified.",
+                    "battleEntity": "Unspecified",
+                    "stateHypothesis": "Outcome dependent on available assets.",
+                }]
+            else:
+                for op in ops:
+                    if not op.get("battleEntity"):
+                        op["battleEntity"] = "Unspecified"
+                    if not op.get("description"):
+                        op["description"] = "No specific operational constraint identified."
+                    if not op.get("stateHypothesis"):
+                        op["stateHypothesis"] = "Outcome dependent on available assets."
 
         print(f"AI assessment complete — label: {parsed.get('label', '?')}")
         return _envelope(parsed)
