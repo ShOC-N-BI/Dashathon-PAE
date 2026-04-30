@@ -1,0 +1,9 @@
+httpx
+requests
+psycopg2-binary
+python-dotenv
+rich
+pydantic
+irc
+uvicorn
+fastapi

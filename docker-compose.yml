@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+
+  # ── PAE Application ───────────────────────────────────────────────────
+  pae:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pae_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist the local backup log outside the container
+      - ./logs:/app/logs
+    networks:
+      - pae_network
+    depends_on:
+      - emulator
+    # extra_hosts allows the container to reach LM Studio
+    # running on your host machine's network IP
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── Emulator (fake orchestrator — for local testing only) ─────────────
+  # Comment this service out when connecting to the real orchestrator.
+  emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pae_emulator
+    restart: unless-stopped
+    command: python tests/emulator/pae_run_emulator.py
+    ports:
+      - "3016:3016"
+    networks:
+      - pae_network
+    volumes:
+      - ./tests:/app/tests
+
+networks:
+  pae_network:
+    driver: bridge
