@@ -4,9 +4,10 @@ services:
       context: .
       dockerfile: docker/dockerfile
     ports:
-      - "8080:8080"
+      - "8050:8050"
+      - "3016:3016"
     volumes:
       # Live code mounting
-      - ./app:/app
+      - ./app:/prod/app
     env_file:
       - .env

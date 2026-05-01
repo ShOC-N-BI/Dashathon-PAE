@@ -3,11 +3,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from config.settings import settings
-from schemas.pae_schemas import PaeOutput, PaeInput, PaeInputCreated, PaeEffect
-import client.pae_output_client as output_client
-import client.pae_input_client  as input_client
-from client.http_client import get_http_client
+from app.config.settings import settings
+from app.schemas.pae_schemas import PaeOutput, PaeInput, PaeInputCreated, PaeEffect
+import app.client.pae_output_client as output_client
+import app.client.pae_input_client  as input_client
+from app.client.http_client import get_http_client
 
 log = logging.getLogger(__name__)
 

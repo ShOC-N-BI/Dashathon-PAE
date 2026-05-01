@@ -30,8 +30,8 @@ from typing import Callable
 
 import httpx
 
-from config.settings import settings
-from schemas.pae_schemas import PaeInputCreated
+from app.config.settings import settings
+from app.schemas.pae_schemas import PaeInputCreated
 
 log = logging.getLogger(__name__)
 

@@ -1,5 +1,5 @@
-from client.http_client import get_http_client
-from schemas.pae_schemas import PaeInput, PaeInputCreated
+from app.client.http_client import get_http_client
+from app.schemas.pae_schemas import PaeInput, PaeInputCreated
 
 
 def retrigger(pae_input: PaeInput) -> dict:

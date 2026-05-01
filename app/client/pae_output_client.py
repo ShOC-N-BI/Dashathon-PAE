@@ -1,6 +1,6 @@
 import json
-from client.http_client import get_http_client
-from schemas.pae_schemas import PaeOutput
+from app.client.http_client import get_http_client
+from app.schemas.pae_schemas import PaeOutput
 
 
 def get_all() -> list[PaeOutput]:

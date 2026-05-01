@@ -3,22 +3,22 @@ import queue as thread_queue
 from datetime import datetime, timezone
 from dash import dcc, html, callback, Input, Output, State, register_page
 import dash_bootstrap_components as dbc
-from config.settings import settings
-from api.pae_api import (
+from app.config.settings import settings
+from app.api.pae_api import (
     fetch_all_pae,
     fetch_pae_by_id,
     submit_pae,
     update_pae,
     submit_pae_input_created,
 )
-from schemas.pae_schemas import PaeOutput
+from app.schemas.pae_schemas import PaeOutput
 
 # Re-use the single SSE connection that main.py already started via
 # PaeSseClient.  The UI drains the same queue the microservice logic uses,
 # so there is exactly one persistent connection to /paeinputs-sse.
-from client.pae_sse_client import PaeSseClient
+from app.client.pae_sse_client import PaeSseClient
 
-register_page(__name__, path="/pae-test", name="PAE Test")
+register_page(__name__, path="/", name="PAE Test")
 
 # ── Default payloads ───────────────────────────────────────────────────────
 DEFAULT_PAE_OUTPUT = json.dumps(
