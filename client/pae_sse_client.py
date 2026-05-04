@@ -28,7 +28,7 @@ import time
 from typing import Callable
 
 import httpx
-import config
+import pae_config as config
 
 from schemas.pae_schemas import PaeInputCreated
 

@@ -28,7 +28,7 @@ LM_MODEL_FULL = "google/gemma-4-31b"
 
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://10.5.185.55:4334/v1/chat/completions")
 LM_MODEL      = os.getenv("LM_MODEL",      LM_MODEL_FAST)
-LM_TIMEOUT    = int(os.getenv("LM_TIMEOUT", "20"))
+LM_TIMEOUT    = int(os.getenv("LM_TIMEOUT", "60"))  # 60s default — NanoGPT cloud calls need more time
 
 # ---------------------------------------------------------------------------
 # NanoGPT — cloud API
@@ -76,23 +76,41 @@ def get_ai_config() -> dict:
     This allows live switching between LM Studio and NanoGPT
     via the config UI without restarting the container.
     """
-    values = dotenv_values(ENV_PATH)
+    # Try multiple possible .env locations (local dev vs Docker container)
+    possible_paths = [
+        ENV_PATH,
+        Path("/app/.env"),
+        Path(".env"),
+    ]
+    values = {}
+    for p in possible_paths:
+        if p.exists():
+            values = dotenv_values(p)
+            print(f"CONFIG: loaded .env from {p}  keys={list(values.keys())}")
+            break
 
-    provider = values.get("AI_PROVIDER", AI_PROVIDER).strip().lower()
+    # Also check environment variables directly as a fallback
+    # (docker-compose env_file injects them into the process environment)
+    provider = (values.get("AI_PROVIDER") or os.getenv("AI_PROVIDER") or AI_PROVIDER).strip().lower()
+    print(f"CONFIG: AI_PROVIDER resolved to '{provider}'")
+
+    def _get(key, default):
+        """Get from .env file first, then process env, then hardcoded default."""
+        return values.get(key) or os.getenv(key) or default
 
     if provider == "nanogpt":
         return {
             "provider": "nanogpt",
-            "url":      values.get("NANOGPT_API_URL", NANOGPT_API_URL),
-            "model":    values.get("NANOGPT_MODEL",   NANOGPT_MODEL),
-            "api_key":  values.get("NANOGPT_API_KEY", NANOGPT_API_KEY),
-            "timeout":  int(values.get("LM_TIMEOUT",  str(LM_TIMEOUT))),
+            "url":      _get("NANOGPT_API_URL", NANOGPT_API_URL),
+            "model":    _get("NANOGPT_MODEL",   NANOGPT_MODEL),
+            "api_key":  _get("NANOGPT_API_KEY", NANOGPT_API_KEY),
+            "timeout":  int(_get("LM_TIMEOUT",  str(LM_TIMEOUT))),
         }
     else:
         return {
             "provider": "lmstudio",
-            "url":      values.get("LM_STUDIO_URL", LM_STUDIO_URL),
-            "model":    values.get("LM_MODEL",      LM_MODEL),
+            "url":      _get("LM_STUDIO_URL", LM_STUDIO_URL),
+            "model":    _get("LM_MODEL",      LM_MODEL),
             "api_key":  "",
-            "timeout":  int(values.get("LM_TIMEOUT", str(LM_TIMEOUT))),
+            "timeout":  int(_get("LM_TIMEOUT", str(LM_TIMEOUT))),
         }

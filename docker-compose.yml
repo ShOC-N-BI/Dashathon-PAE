@@ -1,30 +1,7 @@
-version: "3.9"
-
 services:
 
-  # ── PAE Application ───────────────────────────────────────────────────
-  pae:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: pae_app
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      # Persist the local backup log outside the container
-      - ./logs:/app/logs
-    networks:
-      - pae_network
-    depends_on:
-      - emulator
-    # extra_hosts allows the container to reach LM Studio
-    # running on your host machine's network IP
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  # ── Emulator (fake orchestrator — for local testing only) ─────────────
-  # Comment this service out when connecting to the real orchestrator.
+  # ── Emulator (fake orchestrator — start first) ────────────────────────
+  # Comment out this service when connecting to the real orchestrator.
   emulator:
     build:
       context: .
@@ -36,8 +13,45 @@ services:
       - "3016:3016"
     networks:
       - pae_network
+
+  # ── PAE Application ───────────────────────────────────────────────────
+  pae:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pae_app
+    restart: unless-stopped
+    command: python main.py
+    env_file:
+      - .env
     volumes:
-      - ./tests:/app/tests
+      - ./.env:/app/.env
+      - ./logs:/app/logs
+    networks:
+      - pae_network
+    depends_on:
+      - emulator
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── Config Server (live .env editor UI on port 8080) ─────────────────
+  config:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pae_config
+    restart: unless-stopped
+    command: uvicorn config_server:app --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./.env:/app/.env
+    networks:
+      - pae_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   pae_network:

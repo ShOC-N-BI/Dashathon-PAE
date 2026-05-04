@@ -190,12 +190,17 @@ def get_battle_assessment(
     lm_url: str,
     lm_model: str,
     timeout: int = 20,
+    provider: str = "lmstudio",
+    api_key: str = "",
 ) -> list:
     """
-    Send a tactical message to LM Studio and return a fully populated battle JSON list.
+    Send a tactical message to the configured AI provider and return a fully
+    populated battle JSON list.
 
-    The AI generates all descriptive fields, entities, and effect justifications.
-    The caller supplies the envelope fields (id, requestId, originator, timestamps).
+    Parameters
+    ----------
+    provider : "lmstudio" or "nanogpt"
+    api_key  : Required for NanoGPT. Leave blank for LM Studio.
 
     Returns
     -------
@@ -291,7 +296,11 @@ def get_battle_assessment(
         }
 
     try:
-        response = requests.post(lm_url, json=payload, timeout=timeout)
+        headers = {"Content-Type": "application/json"}
+        if provider == "nanogpt" and api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        print(f"AI PROVIDER: {provider.upper()}  MODEL: {payload['model']}")
+        response = requests.post(lm_url, json=payload, headers=headers, timeout=timeout)
         response.raise_for_status()
 
         full_response = response.json()
@@ -348,13 +357,13 @@ def get_battle_assessment(
         return _envelope(parsed)
 
     except requests.exceptions.Timeout:
-        print(f"WARNING: LM Studio timed out after {timeout}s.")
-        return _error_record(f"LM Studio timed out after {timeout}s.")
+        print(f"WARNING: AI provider timed out after {timeout}s ({lm_url}).")
+        return _error_record(f"AI provider timed out after {timeout}s.")
     except requests.exceptions.ConnectionError:
-        print(f"WARNING: Cannot reach LM Studio at {lm_url}.")
-        return _error_record(f"Cannot reach LM Studio at {lm_url}.")
+        print(f"WARNING: Cannot reach AI provider at {lm_url}.")
+        return _error_record(f"Cannot reach AI provider at {lm_url}.")
     except requests.exceptions.HTTPError as e:
-        print(f"WARNING: LM Studio HTTP error: {e}.")
+        print(f"WARNING: AI provider HTTP error: {e}.")
         return _error_record(f"HTTP error: {e}.")
     except (ValueError, KeyError) as e:
         print(f"WARNING: Unexpected response structure ({type(e).__name__}: {e}).")

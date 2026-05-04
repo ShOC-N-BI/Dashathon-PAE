@@ -1,5 +1,5 @@
 import httpx
-import config
+import pae_config as config
 
 
 def get_http_client() -> httpx.Client:

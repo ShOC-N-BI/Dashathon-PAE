@@ -38,7 +38,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from schemas.pae_schemas import PaeOutput, PaeInput, PaeInputCreated
-import config
+import pae_config as config
 
 log = logging.getLogger(__name__)
 app = FastAPI(title="PAE Emulator", version="1.0.0")

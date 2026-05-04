@@ -1,6 +1,7 @@
 import logging
 import threading
-import config
+import requests
+import pae_config as config
 
 from ai.agent import get_battle_assessment
 from client.pae_sse_client import PaeSseClient
@@ -89,19 +90,33 @@ def run_pipeline(
     live.update(make_dashboard(message, username, None, "THINKING...", source))
 
     # -- Step 1: AI assessment → raw battle JSON dict
+    # Read provider config fresh from .env on every call so live UI
+    # changes (port 8080) take effect immediately without a restart.
+    ai = config.get_ai_config()
+    print(f"USING PROVIDER: {ai['provider'].upper()}  MODEL: {ai['model']}  URL: {ai['url']}  KEY_SET: {bool(ai['api_key'])}")
+
     tactical_json = get_battle_assessment(
         msg_content=message,
         username=username,
         request_id=request_id,
-        lm_url=config.LM_STUDIO_URL,
-        lm_model=config.LM_MODEL,
-        timeout=config.LM_TIMEOUT,
+        lm_url=ai["url"],
+        lm_model=ai["model"],
+        timeout=ai["timeout"],
+        provider=ai["provider"],
+        api_key=ai["api_key"],
     )
 
     # -- Step 2: Write to local log (always, regardless of orchestrator availability)
     log_writer.write(tactical_json)
 
-    # -- Step 3: Validate against PaeOutput schema and POST to orchestrator
+    # -- Step 3: Forward to config server dashboard (fire and forget)
+    try:
+        tactical_json[0]["_source"] = source
+        requests.post("http://config:8080/assessment", json=tactical_json, timeout=2)
+    except Exception:
+        pass  # Dashboard is optional — never block the pipeline
+
+    # -- Step 4: Validate against PaeOutput schema and POST to orchestrator
     record = tactical_json[0]
     try:
         pae_output = PaeOutput.model_validate(record)
@@ -111,7 +126,7 @@ def run_pipeline(
         console.log(f"[red]Failed to submit to orchestrator: {e}[/red]")
         submit_status = "SUBMIT FAILED"
 
-    # -- Step 4: Update dashboard
+    # -- Step 5: Update dashboard
     effects  = record.get("battleEffects", [])
     verbs    = tuple(e.get("effectOperator", "?") for e in effects[:3])
     label    = record.get("label", "?")
@@ -176,7 +191,8 @@ if __name__ == "__main__":
         Panel(
             f"[bold cyan]IRC:[/bold cyan]          {config.IRC_SERVER}:{config.IRC_PORT}  {config.IRC_CHANNEL}\n"
             f"[bold cyan]Orchestrator:[/bold cyan] {config.ORCHESTRATOR_BASE_URL or 'NOT CONFIGURED'}\n"
-            f"[bold cyan]Model:[/bold cyan]        {config.LM_MODEL}\n"
+            f"[bold cyan]AI Provider:[/bold cyan]  {config.AI_PROVIDER.upper()}\n"
+            f"[bold cyan]Model:[/bold cyan]        {config.NANOGPT_MODEL if config.AI_PROVIDER == 'nanogpt' else config.LM_MODEL}\n"
             f"[bold cyan]DB:[/bold cyan]           {config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}",
             title="PAE — Pre-emptive Action Engine",
             border_style="cyan",
