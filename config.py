@@ -1,8 +1,11 @@
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 import os
+from pathlib import Path
 
-# Load values from .env file at project root
-load_dotenv()
+ENV_PATH = Path(__file__).parent / ".env"
+
+# Load values from .env file at startup
+load_dotenv(ENV_PATH)
 
 # ---------------------------------------------------------------------------
 # IRC
@@ -12,29 +15,39 @@ IRC_PORT    = int(os.getenv("IRC_PORT", "6667"))
 IRC_CHANNEL = os.getenv("IRC_CHANNEL", "#app_dev")
 
 # ---------------------------------------------------------------------------
-# LM Studio
-# Host machine on local network running LM Studio at 10.5.185.55:4334
+# AI Provider — choose which backend handles assessments
+# Set AI_PROVIDER to either "lmstudio" or "nanogpt"
 # ---------------------------------------------------------------------------
+AI_PROVIDER = os.getenv("AI_PROVIDER", "lmstudio")
 
-# Available models — swap LM_MODEL to change which one is used
-LM_MODEL_FAST   = "google/gemma-4-e4b"   # smaller, faster responses
-LM_MODEL_FULL   = "google/gemma-4-31b"   # larger, more capable
+# ---------------------------------------------------------------------------
+# LM Studio — local network LLM server
+# ---------------------------------------------------------------------------
+LM_MODEL_FAST = "google/gemma-4-e4b"
+LM_MODEL_FULL = "google/gemma-4-31b"
 
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://10.5.185.55:4334/v1/chat/completions")
-LM_MODEL      = os.getenv("LM_MODEL",      LM_MODEL_FAST)   # change to LM_MODEL_FULL to switch
+LM_MODEL      = os.getenv("LM_MODEL",      LM_MODEL_FAST)
 LM_TIMEOUT    = int(os.getenv("LM_TIMEOUT", "20"))
+
+# ---------------------------------------------------------------------------
+# NanoGPT — cloud API
+# ---------------------------------------------------------------------------
+NANOGPT_API_URL = os.getenv("NANOGPT_API_URL", "https://nano-gpt.com/api/v1/chat/completions")
+NANOGPT_API_KEY = os.getenv("NANOGPT_API_KEY", "")
+NANOGPT_MODEL   = os.getenv("NANOGPT_MODEL",   "gpt-4o")
 
 # ---------------------------------------------------------------------------
 # Orchestrator — central hub for the app cluster
 # ---------------------------------------------------------------------------
-ORCHESTRATOR_BASE_URL = os.getenv("ORCHESTRATOR_BASE_URL", "")  # e.g. http://10.5.185.XX:PORT
+ORCHESTRATOR_BASE_URL = os.getenv("ORCHESTRATOR_BASE_URL", "")
 ORCHESTRATOR_API_KEY  = os.getenv("ORCHESTRATOR_API_KEY",  "")
 
 # ---------------------------------------------------------------------------
-# SSE — retry delay for reconnecting to the orchestrator SSE stream
+# SSE
 # ---------------------------------------------------------------------------
-SSE_URL         = os.getenv("SSE_URL", "")           # e.g. http://10.5.185.XX:PORT/events
-SSE_RETRY_DELAY = int(os.getenv("SSE_RETRY_DELAY", "5"))  # seconds between reconnect attempts
+SSE_URL         = os.getenv("SSE_URL", "")
+SSE_RETRY_DELAY = int(os.getenv("SSE_RETRY_DELAY", "5"))
 
 # ---------------------------------------------------------------------------
 # Battle API
@@ -49,3 +62,37 @@ DB_NAME     = os.getenv("DB_NAME",     "shooca_db")
 DB_USER     = os.getenv("DB_USER",     "shooca")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "shooca222")
 DB_PORT     = int(os.getenv("DB_PORT", "5432"))
+
+
+# ---------------------------------------------------------------------------
+# LIVE RELOAD
+# Reads .env fresh from disk — call this before any setting that
+# can be changed at runtime via the config UI (port 8080).
+# ---------------------------------------------------------------------------
+
+def get_ai_config() -> dict:
+    """
+    Read AI provider settings directly from .env every time.
+    This allows live switching between LM Studio and NanoGPT
+    via the config UI without restarting the container.
+    """
+    values = dotenv_values(ENV_PATH)
+
+    provider = values.get("AI_PROVIDER", AI_PROVIDER).strip().lower()
+
+    if provider == "nanogpt":
+        return {
+            "provider": "nanogpt",
+            "url":      values.get("NANOGPT_API_URL", NANOGPT_API_URL),
+            "model":    values.get("NANOGPT_MODEL",   NANOGPT_MODEL),
+            "api_key":  values.get("NANOGPT_API_KEY", NANOGPT_API_KEY),
+            "timeout":  int(values.get("LM_TIMEOUT",  str(LM_TIMEOUT))),
+        }
+    else:
+        return {
+            "provider": "lmstudio",
+            "url":      values.get("LM_STUDIO_URL", LM_STUDIO_URL),
+            "model":    values.get("LM_MODEL",      LM_MODEL),
+            "api_key":  "",
+            "timeout":  int(values.get("LM_TIMEOUT", str(LM_TIMEOUT))),
+        }

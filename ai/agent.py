@@ -75,6 +75,7 @@ def _get_relevant_context(msg: str) -> str:
     terms = set(words)
     terms.update(f"{words[i]} {words[i+1]}" for i in range(len(words) - 1))
 
+    MAX_ROWS_PER_TABLE = 5  # cap to keep prompt fast
     sections = []
     for label, rows in _ALL_ROWS.items():
         if not rows:
@@ -83,7 +84,7 @@ def _get_relevant_context(msg: str) -> str:
         matched = [r for r in rows[1:] if any(t in " ".join(r).upper() for t in terms)]
         if not matched:
             continue
-        block = "\n".join(" | ".join(c.strip() for c in r) for r in [header] + matched)
+        block = "\n".join(" | ".join(c.strip() for c in r) for r in [header] + matched[:MAX_ROWS_PER_TABLE])
         sections.append(f"=== {label} ===\n{block}")
 
     return "\n\n".join(sections) if sections else "(No matching reference terms — use tactical judgment.)"
@@ -190,12 +191,17 @@ def get_battle_assessment(
     lm_url: str,
     lm_model: str,
     timeout: int = 20,
+    provider: str = "lmstudio",
+    api_key: str = "",
 ) -> list:
     """
-    Send a tactical message to LM Studio and return a fully populated battle JSON list.
+    Send a tactical message to the configured AI provider and return a fully
+    populated battle JSON list.
 
-    The AI generates all descriptive fields, entities, and effect justifications.
-    The caller supplies the envelope fields (id, requestId, originator, timestamps).
+    Parameters
+    ----------
+    provider : "lmstudio" or "nanogpt"
+    api_key  : Required for NanoGPT. Leave blank for LM Studio.
 
     Returns
     -------
@@ -208,7 +214,7 @@ def get_battle_assessment(
             {"role": "system", "content": _build_system_prompt(msg_content)},
             {"role": "user",   "content": f"TACTICAL MESSAGE: {msg_content}"},
         ],
-        "temperature": 0.2,
+        "temperature": 0,
         "stream": False,
     }
 
@@ -291,7 +297,11 @@ def get_battle_assessment(
         }
 
     try:
-        response = requests.post(lm_url, json=payload, timeout=timeout)
+        headers = {"Content-Type": "application/json"}
+        if provider == "nanogpt" and api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        print(f"AI PROVIDER: {provider.upper()}  MODEL: {payload['model']}")
+        response = requests.post(lm_url, json=payload, headers=headers, timeout=timeout)
         response.raise_for_status()
 
         full_response = response.json()
@@ -348,13 +358,13 @@ def get_battle_assessment(
         return _envelope(parsed)
 
     except requests.exceptions.Timeout:
-        print(f"WARNING: LM Studio timed out after {timeout}s.")
-        return _error_record(f"LM Studio timed out after {timeout}s.")
+        print(f"WARNING: AI provider timed out after {timeout}s ({lm_url}).")
+        return _error_record(f"AI provider timed out after {timeout}s.")
     except requests.exceptions.ConnectionError:
-        print(f"WARNING: Cannot reach LM Studio at {lm_url}.")
-        return _error_record(f"Cannot reach LM Studio at {lm_url}.")
+        print(f"WARNING: Cannot reach AI provider at {lm_url}.")
+        return _error_record(f"Cannot reach AI provider at {lm_url}.")
     except requests.exceptions.HTTPError as e:
-        print(f"WARNING: LM Studio HTTP error: {e}.")
+        print(f"WARNING: AI provider HTTP error: {e}.")
         return _error_record(f"HTTP error: {e}.")
     except (ValueError, KeyError) as e:
         print(f"WARNING: Unexpected response structure ({type(e).__name__}: {e}).")
