@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile
     container_name: pae_app
     restart: unless-stopped
-    command: python main.py
+    command: sh -c "python main.py 2>&1; echo EXIT_CODE:0; sleep 30"
     env_file:
       - .env
     volumes:

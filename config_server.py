@@ -30,7 +30,7 @@ ENV_PATH = Path(__file__).parent / ".env"
 app = FastAPI(title="PAE Config Server", version="1.0.0")
 
 # ---------------------------------------------------------------------------
-# ASSESSMENT STORE  — keeps the last 200 assessments in memory
+# ASSESSMENT STORE
 # ---------------------------------------------------------------------------
 
 _assessments: deque = deque(maxlen=200)
@@ -38,7 +38,6 @@ _sse_subscribers: list[asyncio.Queue] = []
 
 
 def _broadcast(record: dict) -> None:
-    """Push a new assessment to all connected SSE dashboard clients."""
     payload = f"data: {json.dumps(record)}\n\n"
     dead = []
     for q in _sse_subscribers:
@@ -52,9 +51,17 @@ def _broadcast(record: dict) -> None:
 
 # ---------------------------------------------------------------------------
 # EDITABLE FIELDS
+# AI_ENDPOINT is the single URL field — pae_config.py detects lmstudio vs
+# nanogpt from the URL automatically (nano-gpt.com = nanogpt, else lmstudio)
 # ---------------------------------------------------------------------------
 
 EDITABLE_FIELDS = {
+    "GBC_API_URL": {
+        "label":       "GBC API URL",
+        "description": "Endpoint to push mapped assessments to — e.g. http://10.5.185.29:3016/paeoutputs",
+        "placeholder": "http://10.5.185.29:3016/paeoutputs",
+        "type":        "url",
+    },
     "ORCHESTRATOR_BASE_URL": {
         "label":       "Orchestrator Base URL",
         "description": "Base URL of the orchestrator cluster app",
@@ -67,35 +74,28 @@ EDITABLE_FIELDS = {
         "placeholder": "your-api-key-here",
         "type":        "password",
     },
-    "AI_PROVIDER": {
-        "label":       "AI Provider",
-        "description": "Which AI backend to use: lmstudio or nanogpt",
-        "placeholder": "lmstudio",
-        "type":        "toggle",
-        "options":     ["lmstudio", "nanogpt"],
-    },
-    "LM_STUDIO_URL": {
-        "label":       "LM Studio URL",
-        "description": "Full URL to the LM Studio completions endpoint",
+    "AI_ENDPOINT": {
+        "label":       "AI Endpoint URL",
+        "description": "Set to LM Studio URL or NanoGPT URL — provider is detected automatically",
         "placeholder": "http://10.5.185.55:4334/v1/chat/completions",
         "type":        "url",
     },
-    "LM_MODEL": {
-        "label":       "LM Studio Model",
-        "description": "Model identifier (google/gemma-4-e4b or google/gemma-4-31b)",
+    "AI_MODEL": {
+        "label":       "AI Model",
+        "description": "Model identifier — e.g. google/gemma-4-e4b for LM Studio or gpt-4o for NanoGPT",
         "placeholder": "google/gemma-4-e4b",
         "type":        "text",
     },
-    "NANOGPT_API_KEY": {
-        "label":       "NanoGPT API Key",
-        "description": "Your NanoGPT API key (only used when AI_PROVIDER=nanogpt)",
-        "placeholder": "sk-nano-...",
+    "AI_API_KEY": {
+        "label":       "AI API Key",
+        "description": "API key — leave blank for LM Studio, required for NanoGPT",
+        "placeholder": "sk-nano-... (leave blank for LM Studio)",
         "type":        "password",
     },
-    "NANOGPT_MODEL": {
-        "label":       "NanoGPT Model",
-        "description": "Model to use via NanoGPT (e.g. gpt-4o, claude-3-5-sonnet)",
-        "placeholder": "gpt-4o",
+    "IRC_NICKNAME": {
+        "label":       "IRC Bot Nickname",
+        "description": "Name the bot uses on IRC — leave blank for a random name",
+        "placeholder": "PAE_Bot",
         "type":        "text",
     },
     "IRC_SERVER": {
@@ -105,16 +105,52 @@ EDITABLE_FIELDS = {
         "type":        "text",
     },
     "IRC_CHANNEL": {
-        "label":       "IRC Channel",
-        "description": "IRC channel to listen on",
-        "placeholder": "#app_dev",
+        "label":       "IRC Channels",
+        "description": "Channels to listen on — separate multiple with commas e.g. #app_dev,#ops,#intel",
+        "placeholder": "#app_dev,#ops",
         "type":        "text",
     },
     "SSE_RETRY_DELAY": {
         "label":       "SSE Retry Delay (seconds)",
-        "description": "How long to wait before reconnecting to the SSE stream",
+        "description": "How long to wait before reconnecting to the orchestrator SSE stream",
         "placeholder": "5",
         "type":        "number",
+    },
+    # ── Database — configure when your DB is ready ────────────────────────
+    "DB_HOST": {
+        "label":       "Database Host",
+        "description": "Hostname or IP of your PostgreSQL database server",
+        "placeholder": "10.5.185.53",
+        "type":        "text",
+        "section":     "database",
+    },
+    "DB_PORT": {
+        "label":       "Database Port",
+        "description": "PostgreSQL port (default 5432)",
+        "placeholder": "5432",
+        "type":        "number",
+        "section":     "database",
+    },
+    "DB_NAME": {
+        "label":       "Database Name",
+        "description": "Name of the PostgreSQL database",
+        "placeholder": "shooca_db",
+        "type":        "text",
+        "section":     "database",
+    },
+    "DB_USER": {
+        "label":       "Database User",
+        "description": "PostgreSQL username",
+        "placeholder": "shooca",
+        "type":        "text",
+        "section":     "database",
+    },
+    "DB_PASSWORD": {
+        "label":       "Database Password",
+        "description": "PostgreSQL password",
+        "placeholder": "your-db-password",
+        "type":        "password",
+        "section":     "database",
     },
 }
 
@@ -156,6 +192,12 @@ def write_env(updates: dict) -> None:
             lines.append(f"{key}={val}")
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+
+def detect_provider(url: str) -> str:
+    """Detect provider from URL — nano-gpt.com = nanogpt, anything else = lmstudio."""
+    return "nanogpt" if "nano-gpt.com" in url else "lmstudio"
+
+
 # ---------------------------------------------------------------------------
 # MODELS
 # ---------------------------------------------------------------------------
@@ -185,23 +227,22 @@ def update_env(body: EnvUpdate):
     return {"status": "saved", "updated": list(safe.keys())}
 
 
-@app.post("/provider/{provider}")
-def set_provider(provider: str):
-    """Quick toggle endpoint — sets AI_PROVIDER directly."""
-    if provider not in ("lmstudio", "nanogpt"):
-        raise HTTPException(status_code=400, detail="Provider must be lmstudio or nanogpt.")
-    write_env({"AI_PROVIDER": provider})
-    return {"status": "saved", "AI_PROVIDER": provider}
-
-
 @app.get("/status")
 def get_status():
     current = read_env()
+    endpoint = current.get("AI_ENDPOINT", "")
+    provider = detect_provider(endpoint) if endpoint else "lmstudio"
+    db_host = current.get("DB_HOST", "")
+    db_name = current.get("DB_NAME", "")
+    db_status = f"{db_host}/{db_name}" if db_host and db_name else "NOT CONFIGURED"
     return {
         "orchestrator": current.get("ORCHESTRATOR_BASE_URL", "NOT SET"),
-        "model":        current.get("LM_MODEL", "NOT SET"),
+        "ai_endpoint":  endpoint or "NOT SET",
+        "ai_provider":  provider.upper(),
+        "ai_model":     current.get("AI_MODEL", "NOT SET"),
         "irc_server":   current.get("IRC_SERVER", "NOT SET"),
         "irc_channel":  current.get("IRC_CHANNEL", "NOT SET"),
+        "db_status":    db_status,
     }
 
 # ---------------------------------------------------------------------------
@@ -210,10 +251,6 @@ def get_status():
 
 @app.post("/assessment")
 async def receive_assessment(request: Request):
-    """
-    main.py POSTs every completed battle JSON record here.
-    Stored in memory and broadcast to all live dashboard clients.
-    """
     body = await request.json()
     record = body[0] if isinstance(body, list) else body
     record["_receivedAt"] = datetime.utcnow().isoformat() + "Z"
@@ -224,13 +261,11 @@ async def receive_assessment(request: Request):
 
 @app.get("/assessments")
 def get_assessments():
-    """Return full assessment history as JSON."""
     return JSONResponse(content=list(_assessments))
 
 
 @app.get("/assessments/sse")
 async def assessments_sse(request: Request):
-    """SSE stream — pushes each new assessment to connected dashboard clients."""
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     _sse_subscribers.append(queue)
 
@@ -296,17 +331,17 @@ CONFIG_HTML = """<!DOCTYPE html>
     nav a{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:8px 16px;border:1px solid transparent;transition:.2s;}
     nav a:hover{color:var(--accent);border-color:var(--border);}
     nav a.active{color:var(--accent);border-color:var(--accent);background:rgba(0,229,255,.05);}
-    .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);animation:pulse 2s infinite;display:inline-block;}
-    @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
     main{max-width:860px;margin:0 auto;padding:48px 40px;}
     .status-panel{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);padding:20px 24px;margin-bottom:40px;display:grid;grid-template-columns:1fr 1fr;gap:12px 32px;}
     .status-item label{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-family:var(--mono);}
     .status-item .val{font-family:var(--mono);font-size:12px;color:var(--accent);margin-top:4px;word-break:break-all;}
+    .status-item .val.provider-nano{color:var(--accent2);}
     .section-title{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);font-family:var(--mono);margin-bottom:24px;display:flex;align-items:center;gap:12px;}
     .section-title::after{content:'';flex:1;height:1px;background:var(--border);}
     .fields{display:flex;flex-direction:column;gap:20px;margin-bottom:36px;}
     .field{display:grid;grid-template-columns:220px 1fr;gap:0 24px;align-items:start;padding:20px 24px;background:var(--surface);border:1px solid var(--border);transition:border-color .2s;}
     .field:hover{border-color:rgba(0,229,255,.3);}
+    .field.ai-field{border-left:3px solid var(--accent);}
     .field-meta label{font-size:12px;font-weight:600;color:var(--text);display:block;margin-bottom:6px;}
     .field-meta .desc{font-size:11px;color:var(--muted);line-height:1.5;}
     .field-input-wrap{position:relative;}
@@ -314,6 +349,9 @@ CONFIG_HTML = """<!DOCTYPE html>
     .field input:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
     .field input.modified{border-color:var(--accent2);box-shadow:0 0 0 1px var(--accent2);}
     .modified-tag{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:9px;letter-spacing:2px;color:var(--accent2);font-family:var(--mono);text-transform:uppercase;pointer-events:none;}
+    .provider-hint{font-family:var(--mono);font-size:10px;margin-top:6px;padding:6px 10px;border:1px solid var(--border);}
+    .provider-hint.lm{color:var(--accent);border-color:rgba(0,229,255,.3);background:rgba(0,229,255,.04);}
+    .provider-hint.nano{color:var(--accent2);border-color:rgba(255,107,53,.3);background:rgba(255,107,53,.04);}
     .actions{display:flex;gap:14px;align-items:center;}
     .btn-save{background:var(--accent);color:var(--bg);border:none;padding:12px 32px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:3px;text-transform:uppercase;cursor:pointer;transition:.15s;}
     .btn-save:hover{background:#33eeff;box-shadow:0 0 30px rgba(0,229,255,.3);}
@@ -325,12 +363,10 @@ CONFIG_HTML = """<!DOCTYPE html>
     .toast.error{border-left-color:var(--error);color:var(--error);}
     .toast.success{color:var(--success);}
     .warning-box{background:rgba(255,107,53,.08);border:1px solid rgba(255,107,53,.3);border-left:3px solid var(--accent2);padding:14px 20px;margin-bottom:32px;font-size:12px;color:var(--accent2);font-family:var(--mono);line-height:1.6;}
-    .provider-switch{display:flex;align-items:center;gap:0;margin-bottom:40px;background:var(--surface);border:1px solid var(--border);width:fit-content;}
-    .provider-switch-label{font-family:var(--mono);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);padding:14px 20px;border-right:1px solid var(--border);}
-    .provider-btn{font-family:var(--mono);font-size:12px;letter-spacing:2px;text-transform:uppercase;padding:14px 28px;border:none;cursor:pointer;transition:.15s;background:transparent;color:var(--muted);}
-    .provider-btn.active-lm{background:var(--accent);color:var(--bg);font-weight:700;}
-    .provider-btn.active-nano{background:var(--accent2);color:var(--bg);font-weight:700;}
-    .provider-btn:hover:not(.active-lm):not(.active-nano){color:var(--text);background:rgba(255,255,255,.04);}
+    .field.db-field{border-left:3px solid #a855f7;}
+    .db-section-title{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:#a855f7;font-family:var(--mono);margin-bottom:24px;margin-top:8px;display:flex;align-items:center;gap:12px;}
+    .db-section-title::after{content:'';flex:1;height:1px;background:rgba(168,85,247,.3);}
+    .db-not-configured{font-family:var(--mono);font-size:10px;color:#a855f7;background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.2);border-left:3px solid #a855f7;padding:12px 16px;margin-bottom:24px;line-height:1.6;}
   </style>
 </head>
 <body>
@@ -347,16 +383,12 @@ CONFIG_HTML = """<!DOCTYPE html>
 <main>
   <div class="status-panel">
     <div class="status-item"><label>Orchestrator</label><div class="val" id="st-orchestrator">loading...</div></div>
-    <div class="status-item"><label>Model</label><div class="val" id="st-model">loading...</div></div>
+    <div class="status-item"><label>AI Provider</label><div class="val" id="st-provider">loading...</div></div>
     <div class="status-item"><label>IRC Server</label><div class="val" id="st-irc">loading...</div></div>
-    <div class="status-item"><label>IRC Channel</label><div class="val" id="st-channel">loading...</div></div>
+    <div class="status-item"><label>Active Model</label><div class="val" id="st-model">loading...</div></div>
+    <div class="status-item"><label>Database</label><div class="val" id="st-db">loading...</div></div>
   </div>
-  <div class="provider-switch">
-    <span class="provider-switch-label">AI ENGINE</span>
-    <button class="provider-btn" id="btn-lm" onclick="setProvider('lmstudio')">⚡ LM Studio</button>
-    <button class="provider-btn" id="btn-nano" onclick="setProvider('nanogpt')">☁ NanoGPT</button>
-  </div>
-  <div class="warning-box">⚠ Changes are written to .env immediately. Restart the container to force a full reload.</div>
+  <div class="warning-box">⚠ Changes are written to .env immediately and take effect on the next message. To switch between LM Studio and NanoGPT, update the AI Endpoint URL field.</div>
   <div class="section-title">Configuration Fields</div>
   <div class="fields" id="fields"></div>
   <div class="actions">
@@ -366,69 +398,120 @@ CONFIG_HTML = """<!DOCTYPE html>
 </main>
 <div class="toast" id="toast"></div>
 <script>
+  const AI_FIELDS = ['AI_ENDPOINT', 'AI_MODEL', 'AI_API_KEY'];
   let originalValues={},fieldMeta={};
+
+  function detectProvider(url){
+    return url && url.includes('nano-gpt.com') ? 'nanogpt' : 'lmstudio';
+  }
+
   async function loadEnv(){
-    const res=await fetch('/env');const data=await res.json();fieldMeta=data;originalValues={};
+    const res=await fetch('/env');
+    const data=await res.json();
+    fieldMeta=data;originalValues={};
     const container=document.getElementById('fields');container.innerHTML='';
+    const DB_FIELDS=['DB_HOST','DB_PORT','DB_NAME','DB_USER','DB_PASSWORD'];
+    let dbSectionAdded=false;
     for(const[key,meta]of Object.entries(data)){
       originalValues[key]=meta.value;
       const t=meta.type==='password'?'password':'text';
-      const f=document.createElement('div');f.className='field';
-      f.innerHTML=`<div class="field-meta"><label>${meta.label}</label><div class="desc">${meta.description}</div></div><div class="field-input-wrap"><input type="${t}" id="field-${key}" data-key="${key}" value="${esc(meta.value)}" placeholder="${esc(meta.placeholder)}" oninput="onInput(this)" autocomplete="off"/><span class="modified-tag" id="tag-${key}" style="display:none">MODIFIED</span></div>`;
+      const isAI=AI_FIELDS.includes(key);
+      const isDB=DB_FIELDS.includes(key);
+      // Insert DB section title before first DB field
+      if(isDB && !dbSectionAdded){
+        const notice=document.createElement('div');
+        notice.className='db-not-configured';
+        notice.textContent='🗄  Database — configure when your DB is ready. These settings are used by db_writer.py to INSERT assessments directly into PostgreSQL.';
+        container.appendChild(notice);
+        const title=document.createElement('div');
+        title.className='db-section-title';
+        title.innerHTML='Database Connection';
+        container.appendChild(title);
+        dbSectionAdded=true;
+      }
+      const f=document.createElement('div');
+      f.className='field'+(isAI?' ai-field':isDB?' db-field':'');
+      f.innerHTML=`<div class="field-meta"><label>${meta.label}</label><div class="desc">${meta.description}</div></div><div class="field-input-wrap"><input type="${t}" id="field-${key}" data-key="${key}" value="${esc(meta.value)}" placeholder="${esc(meta.placeholder)}" oninput="onInput(this)" autocomplete="off"/><span class="modified-tag" id="tag-${key}" style="display:none">MODIFIED</span>${key==='AI_ENDPOINT'?'<div class="provider-hint lm" id="provider-hint">⚡ LM STUDIO detected</div>':''}</div>`;
       container.appendChild(f);
     }
+    // Set initial provider hint
+    const epEl=document.getElementById('field-AI_ENDPOINT');
+    if(epEl) updateProviderHint(epEl.value);
+    // Wire endpoint input to update hint live
+    const epInput=document.getElementById('field-AI_ENDPOINT');
+    if(epInput) epInput.addEventListener('input', e=>updateProviderHint(e.target.value));
   }
+
+  function updateProviderHint(url){
+    const hint=document.getElementById('provider-hint');
+    if(!hint)return;
+    const p=detectProvider(url);
+    if(p==='nanogpt'){
+      hint.className='provider-hint nano';
+      hint.textContent='☁ NANOGPT detected — make sure AI API Key is set';
+    } else {
+      hint.className='provider-hint lm';
+      hint.textContent='⚡ LM STUDIO detected — AI API Key not required';
+    }
+  }
+
   async function loadStatus(){
-    try{const res=await fetch('/status');const d=await res.json();
+    try{
+      const res=await fetch('/status');const d=await res.json();
       document.getElementById('st-orchestrator').textContent=d.orchestrator;
-      document.getElementById('st-model').textContent=d.model;
-      document.getElementById('st-irc').textContent=d.irc_server;
-      document.getElementById('st-channel').textContent=d.irc_channel;
+      document.getElementById('st-irc').textContent=d.irc_server+' '+d.irc_channel;
+      document.getElementById('st-model').textContent=d.ai_model;
+      document.getElementById('st-db').textContent=d.db_status;
+      const provEl=document.getElementById('st-provider');
+      provEl.textContent=d.ai_provider;
+      provEl.className='val'+(d.ai_provider==='NANOGPT'?' provider-nano':'');
     }catch(e){}
   }
+
   function onInput(el){
     const key=el.dataset.key,tag=document.getElementById('tag-'+key);
     if(el.value!==originalValues[key]){el.classList.add('modified');tag.style.display='block';}
     else{el.classList.remove('modified');tag.style.display='none';}
   }
-  function resetForm(){for(const key of Object.keys(originalValues)){const el=document.getElementById('field-'+key);if(el){el.value=originalValues[key];el.classList.remove('modified');document.getElementById('tag-'+key).style.display='none';}}}
+
+  function resetForm(){
+    for(const key of Object.keys(originalValues)){
+      const el=document.getElementById('field-'+key);
+      if(el){
+        el.value=originalValues[key];
+        el.classList.remove('modified');
+        document.getElementById('tag-'+key).style.display='none';
+        if(key==='AI_ENDPOINT') updateProviderHint(el.value);
+      }
+    }
+  }
+
   async function saveChanges(){
     const values={};let hasChanges=false;
-    for(const key of Object.keys(originalValues)){const el=document.getElementById('field-'+key);if(el&&el.value!==originalValues[key]){values[key]=el.value;hasChanges=true;}}
+    for(const key of Object.keys(originalValues)){
+      const el=document.getElementById('field-'+key);
+      if(el&&el.value!==originalValues[key]){values[key]=el.value;hasChanges=true;}
+    }
     if(!hasChanges){showToast('No changes to save.',false);return;}
     const btn=document.getElementById('btn-save');btn.disabled=true;btn.textContent='Saving...';
-    try{const res=await fetch('/env',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values})});
+    try{
+      const res=await fetch('/env',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values})});
       if(res.ok){const d=await res.json();showToast('Saved: '+d.updated.join(', '),true);await loadEnv();await loadStatus();}
       else showToast('Save failed.',false);
     }catch(e){showToast('Network error.',false);}
     btn.disabled=false;btn.textContent='Save Changes';
   }
-  function showToast(msg,ok){const t=document.getElementById('toast');t.textContent=(ok?'✓  ':'✗  ')+msg;t.className='toast show '+(ok?'success':'error');setTimeout(()=>{t.className='toast';},3500);}
+
+  function showToast(msg,ok){
+    const t=document.getElementById('toast');
+    t.textContent=(ok?'✓  ':'✗  ')+msg;
+    t.className='toast show '+(ok?'success':'error');
+    setTimeout(()=>{t.className='toast';},3500);
+  }
+
   function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-  async function setProvider(p){
-    try{
-      const res=await fetch('/provider/'+p,{method:'POST'});
-      if(res.ok){
-        showToast('Switched to '+p.toUpperCase(),true);
-        updateProviderButtons(p);
-      } else showToast('Switch failed.',false);
-    }catch(e){showToast('Network error.',false);}
-  }
-  function updateProviderButtons(p){
-    const lm=document.getElementById('btn-lm');
-    const nano=document.getElementById('btn-nano');
-    lm.className='provider-btn'+(p==='lmstudio'?' active-lm':'');
-    nano.className='provider-btn'+(p==='nanogpt'?' active-nano':'');
-  }
-  async function loadProvider(){
-    try{
-      const res=await fetch('/env');
-      const d=await res.json();
-      const p=(d.AI_PROVIDER&&d.AI_PROVIDER.value)||'lmstudio';
-      updateProviderButtons(p);
-    }catch(e){}
-  }
-  loadEnv();loadStatus();loadProvider();setInterval(loadStatus,10000);
+
+  loadEnv();loadStatus();setInterval(loadStatus,10000);
 </script>
 </body>
 </html>"""
@@ -454,7 +537,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     *{box-sizing:border-box;margin:0;padding:0;}
     body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden;}
     body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,.008) 3px,rgba(0,229,255,.008) 4px);pointer-events:none;z-index:1000;}
-
     header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
     .logo{display:flex;align-items:center;gap:12px;}
     .logo-badge{width:34px;height:34px;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--accent);}
@@ -467,20 +549,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .live-badge{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--accent3);}
     .dot{width:6px;height:6px;border-radius:50%;background:var(--accent3);animation:blink 1.2s infinite;}
     @keyframes blink{0%,100%{opacity:1;}50%{opacity:.2;}}
-
     main{max-width:1100px;margin:0 auto;padding:32px;}
-
-    /* ── LIVE FEED ── */
     .section-label{font-family:var(--mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:12px;}
     .section-label::after{content:'';flex:1;height:1px;background:var(--border);}
-
     #live-feed{margin-bottom:40px;min-height:80px;}
-
     .card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);margin-bottom:16px;overflow:hidden;animation:slideIn .3s ease;}
     .card.new{border-left-color:var(--accent3);animation:flashIn .4s ease;}
     @keyframes slideIn{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:none;}}
     @keyframes flashIn{0%{background:rgba(127,255,107,.08);}100%{background:var(--surface);}}
-
     .card-header{padding:14px 20px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;cursor:pointer;user-select:none;}
     .card-header:hover{background:rgba(255,255,255,.02);}
     .card-title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
@@ -490,19 +566,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .card-meta{text-align:right;flex-shrink:0;}
     .card-time{font-family:var(--mono);font-size:10px;color:var(--muted);}
     .card-toggle{font-family:var(--mono);font-size:10px;color:var(--accent);margin-top:4px;letter-spacing:1px;}
-
     .card-body{padding:0 20px 20px;display:none;}
     .card-body.open{display:block;}
-
     .card-description{font-size:13px;color:var(--text);line-height:1.5;margin-bottom:16px;padding:10px 14px;background:var(--surface2);border-left:2px solid var(--border);}
-
     .chat-msg{font-family:var(--mono);font-size:12px;color:var(--accent2);background:rgba(255,107,53,.06);border:1px solid rgba(255,107,53,.2);padding:8px 14px;margin-bottom:16px;line-height:1.5;}
-
     .tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
     .tag{font-family:var(--mono);font-size:10px;padding:3px 10px;border:1px solid var(--border);color:var(--muted);letter-spacing:1px;text-transform:uppercase;}
     .tag.entity{border-color:rgba(0,229,255,.3);color:var(--accent);}
     .tag.battle{border-color:rgba(255,107,53,.3);color:var(--accent2);}
-
     .effects{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:4px;}
     .effect{background:var(--surface2);border:1px solid var(--border);padding:14px;}
     .effect.recommended{border-color:rgba(0,229,255,.4);}
@@ -517,11 +588,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .ops-box{background:var(--bg);border:1px solid var(--border);padding:8px 10px;margin-top:6px;}
     .ops-label{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;}
     .ops-val{font-size:11px;color:var(--text);}
-
-    /* ── HISTORY ── */
     #history .card{border-left-color:var(--border);}
     #history .card:hover{border-left-color:var(--accent);}
-
     .empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:32px;text-align:center;border:1px dashed var(--border);}
   </style>
 </head>
@@ -537,98 +605,66 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </nav>
   <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
 </header>
-
 <main>
   <div class="section-label">Live Feed</div>
   <div id="live-feed"><div class="empty" id="live-empty">Waiting for assessments...</div></div>
-
   <div class="section-label">History</div>
   <div id="history"><div class="empty" id="hist-empty">No assessments yet.</div></div>
 </main>
-
 <script>
-  const liveEl   = document.getElementById('live-feed');
-  const histEl   = document.getElementById('history');
-  const liveEmpty = document.getElementById('live-empty');
-  const histEmpty = document.getElementById('hist-empty');
-  const statusEl = document.getElementById('live-status');
-  const MAX_LIVE = 3;
-  let liveCards  = [];
+  const liveEl=document.getElementById('live-feed');
+  const histEl=document.getElementById('history');
+  const liveEmpty=document.getElementById('live-empty');
+  const histEmpty=document.getElementById('hist-empty');
+  const statusEl=document.getElementById('live-status');
+  const MAX_LIVE=3;
+  let liveCards=[];
 
-  // ── Helpers ───────────────────────────────────────────────────────────
+  function timeStr(iso){if(!iso)return '—';const d=new Date(iso);return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+  function sourceLabel(r){if(r._source)return r._source.toUpperCase();return r.originator==='SSE'?'SSE':'IRC';}
 
-  function fmt(s){ return s ? String(s) : '—'; }
-
-  function timeStr(iso){
-    if(!iso) return '—';
-    const d = new Date(iso);
-    return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  }
-
-  function sourceLabel(r){
-    if(r._source) return r._source.toUpperCase();
-    return r.originator === 'SSE' ? 'SSE' : 'IRC';
-  }
-
-  // ── Card builder ──────────────────────────────────────────────────────
-
-  function buildCard(r, isNew){
-    const card = document.createElement('div');
-    card.className = 'card' + (isNew ? ' new' : '');
-
-    const effects = r.battleEffects || [];
-    const entities = r.entitiesOfInterest || [];
-    const battleEntities = r.battleEntity || [];
-    const chat = r.chat || [];
-
-    // Header
-    const hdr = document.createElement('div');
-    hdr.className = 'card-header';
-    hdr.innerHTML = `
+  function buildCard(r,isNew){
+    const card=document.createElement('div');
+    card.className='card'+(isNew?' new':'');
+    const effects=r.battleEffects||[];
+    const entities=r.entitiesOfInterest||[];
+    const battleEntities=r.battleEntity||[];
+    const chat=r.chat||[];
+    const hdr=document.createElement('div');
+    hdr.className='card-header';
+    hdr.innerHTML=`
       <div>
         <div class="card-title-row">
-          <span class="card-label">${esc(r.label || 'Untitled')}</span>
+          <span class="card-label">${esc(r.label||'Untitled')}</span>
           <span class="card-source">${sourceLabel(r)}</span>
-          <span class="card-originator">${esc(r.originator || '?')}</span>
+          <span class="card-originator">${esc(r.originator||'?')}</span>
         </div>
         <div style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--muted)">
           ${effects.map(e=>`<span style="margin-right:12px;color:${e.recommended?'var(--accent3)':'var(--muted)'}">${esc(e.effectOperator)}</span>`).join('')}
         </div>
       </div>
       <div class="card-meta">
-        <div class="card-time">${timeStr(r._receivedAt || r.lastUpdated)}</div>
+        <div class="card-time">${timeStr(r._receivedAt||r.lastUpdated)}</div>
         <div class="card-toggle">▼ EXPAND</div>
       </div>`;
     card.appendChild(hdr);
-
-    // Body
-    const body = document.createElement('div');
-    body.className = 'card-body';
-
-    // Chat message
-    if(chat[0]) body.innerHTML += `<div class="chat-msg">📨 ${esc(chat[0])}</div>`;
-
-    // Description
-    if(r.description) body.innerHTML += `<div class="card-description">${esc(r.description)}</div>`;
-
-    // Tags
-    if(entities.length || battleEntities.length){
-      const tags = document.createElement('div');
-      tags.className = 'tags';
-      entities.forEach(e=>{ const t=document.createElement('span');t.className='tag entity';t.textContent=e;tags.appendChild(t); });
-      battleEntities.forEach(e=>{ const t=document.createElement('span');t.className='tag battle';t.textContent=e;tags.appendChild(t); });
+    const body=document.createElement('div');
+    body.className='card-body';
+    if(chat[0])body.innerHTML+=`<div class="chat-msg">📨 ${esc(chat[0])}</div>`;
+    if(r.description)body.innerHTML+=`<div class="card-description">${esc(r.description)}</div>`;
+    if(entities.length||battleEntities.length){
+      const tags=document.createElement('div');tags.className='tags';
+      entities.forEach(e=>{const t=document.createElement('span');t.className='tag entity';t.textContent=e;tags.appendChild(t);});
+      battleEntities.forEach(e=>{const t=document.createElement('span');t.className='tag battle';t.textContent=e;tags.appendChild(t);});
       body.appendChild(tags);
     }
-
-    // Effects
     if(effects.length){
-      const grid = document.createElement('div');
-      grid.className = 'effects';
+      const grid=document.createElement('div');grid.className='effects';
       effects.forEach(ef=>{
-        const ops = (ef.opsLimits||[])[0]||{};
-        const div = document.createElement('div');
-        div.className = 'effect' + (ef.recommended?' recommended':'');
-        div.innerHTML = `
+        const ops=(ef.opsLimits||[])[0]||{};
+        const div=document.createElement('div');
+        div.className='effect'+(ef.recommended?' recommended':'');
+        div.innerHTML=`
           <div class="effect-header">
             <span class="effect-rank">E0${ef.ranking||'?'}</span>
             ${ef.recommended?'<span class="effect-rec">RECOMMENDED</span>':''}
@@ -642,89 +678,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       });
       body.appendChild(grid);
     }
-
     card.appendChild(body);
-
-    // Toggle
-    hdr.addEventListener('click', ()=>{
-      const open = body.classList.toggle('open');
-      hdr.querySelector('.card-toggle').textContent = open ? '▲ COLLAPSE' : '▼ EXPAND';
+    hdr.addEventListener('click',()=>{
+      const open=body.classList.toggle('open');
+      hdr.querySelector('.card-toggle').textContent=open?'▲ COLLAPSE':'▼ EXPAND';
     });
-
     return card;
   }
 
-  function esc(s){
-    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
-
-  // ── Add to live feed ──────────────────────────────────────────────────
+  function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
   function addToLive(r){
-    liveEmpty.style.display = 'none';
-    const card = buildCard(r, true);
-    // Auto-expand the latest card
+    liveEmpty.style.display='none';
+    const card=buildCard(r,true);
     card.querySelector('.card-body').classList.add('open');
-    card.querySelector('.card-toggle').textContent = '▲ COLLAPSE';
-    liveEl.insertBefore(card, liveEl.firstChild);
+    card.querySelector('.card-toggle').textContent='▲ COLLAPSE';
+    liveEl.insertBefore(card,liveEl.firstChild);
     liveCards.unshift(card);
-    // Keep only MAX_LIVE cards in the live section
-    if(liveCards.length > MAX_LIVE){
-      const old = liveCards.pop();
-      old.remove();
-    }
+    if(liveCards.length>MAX_LIVE){const old=liveCards.pop();old.remove();}
   }
-
-  // ── Add to history ────────────────────────────────────────────────────
 
   function addToHistory(r){
-    histEmpty.style.display = 'none';
-    const card = buildCard(r, false);
-    histEl.insertBefore(card, histEl.firstChild);
+    histEmpty.style.display='none';
+    const card=buildCard(r,false);
+    histEl.insertBefore(card,histEl.firstChild);
   }
-
-  // ── Load history on page load ─────────────────────────────────────────
 
   async function loadHistory(){
     try{
-      const res = await fetch('/assessments');
-      const data = await res.json();
-      if(data.length){
-        histEmpty.style.display = 'none';
-        data.forEach(r => addToHistory(r));
-      }
+      const res=await fetch('/assessments');
+      const data=await res.json();
+      if(data.length){histEmpty.style.display='none';data.forEach(r=>addToHistory(r));}
     }catch(e){}
   }
 
-  // ── SSE connection ────────────────────────────────────────────────────
-
   function connectSSE(){
-    const es = new EventSource('/assessments/sse');
-
-    es.onopen = () => {
-      statusEl.textContent = 'LIVE';
-      statusEl.style.color = 'var(--accent3)';
+    const es=new EventSource('/assessments/sse');
+    es.onopen=()=>{statusEl.textContent='LIVE';statusEl.style.color='var(--accent3)';};
+    es.onmessage=(e)=>{
+      if(!e.data||e.data.trim()==='')return;
+      try{const r=JSON.parse(e.data);addToLive(r);addToHistory(r);}catch(err){}
     };
-
-    es.onmessage = (e) => {
-      if(!e.data || e.data.trim() === '') return;
-      try{
-        const r = JSON.parse(e.data);
-        addToLive(r);
-        addToHistory(r);
-      }catch(err){}
-    };
-
-    es.onerror = () => {
-      statusEl.textContent = 'RECONNECTING...';
-      statusEl.style.color = 'var(--accent2)';
-      es.close();
-      setTimeout(connectSSE, 3000);
+    es.onerror=()=>{
+      statusEl.textContent='RECONNECTING...';statusEl.style.color='var(--accent2)';
+      es.close();setTimeout(connectSSE,3000);
     };
   }
 
-  loadHistory();
-  connectSSE();
+  loadHistory();connectSSE();
 </script>
 </body>
 </html>"""

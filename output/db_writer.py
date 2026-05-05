@@ -1,6 +1,4 @@
 import json
-import psycopg2
-from psycopg2.extras import Json
 
 
 def insert(
@@ -14,36 +12,29 @@ def insert(
     """
     Insert a completed battle JSON record as a new row in the pae_data table.
 
-    Each reassessment is always a fresh INSERT — never an UPDATE — so the
-    original row is preserved alongside the new assessment.
+    psycopg2 is imported inside the function so a missing or unconfigured DB
+    never crashes the app on startup. This function is only called when DB
+    credentials are present in .env.
 
-    The inserted row captures:
-        - request_id  : the unique track ID from the JSON
-        - originator  : the source username or label (IRC nick or "SSE")
-        - label       : short tactical title from the AI
-        - description : strategic summary from the AI
-        - payload     : the full battle JSON stored as JSONB
-        - message     : the original raw chat message
-
-    Parameters
-    ----------
-    tactical_json : The completed battle JSON list from ai.agent.
-    db_*          : Postgres connection parameters from config.py.
-
-    Returns
-    -------
-    True on success, False on any failure.
+    Returns True on success, False on any failure.
     """
-    record   = tactical_json[0]
-    chat     = record.get("chat", [])
+    try:
+        import psycopg2
+        from psycopg2.extras import Json
+    except ImportError:
+        print("WARNING: psycopg2 not installed — skipping DB write.")
+        return False
+
+    record = tactical_json[0]
+    chat   = record.get("chat", [])
 
     row = {
         "request_id":  record.get("requestId"),
         "originator":  record.get("originator"),
         "label":       record.get("label"),
         "description": record.get("description"),
-        "payload":     Json(record),                    # full JSON stored as JSONB
-        "message":     chat[0] if chat else None,       # original raw message
+        "payload":     Json(record),
+        "message":     chat[0] if chat else None,
     }
 
     sql = """
@@ -65,13 +56,13 @@ def insert(
         with conn:
             with conn.cursor() as cur:
                 cur.execute(sql, row)
-        print(f"💾  DB insert OK — requestId: {row['request_id']}  label: {row['label']}")
+        print(f"DB insert OK — requestId: {row['request_id']}  label: {row['label']}")
         return True
 
     except psycopg2.OperationalError as e:
-        print(f"⚠️  DB connection failed: {e}")
+        print(f"WARNING: DB connection failed: {e}")
     except psycopg2.Error as e:
-        print(f"⚠️  DB insert failed: {e}")
+        print(f"WARNING: DB insert failed: {e}")
     finally:
         if conn:
             conn.close()

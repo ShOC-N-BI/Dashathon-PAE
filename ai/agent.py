@@ -75,6 +75,7 @@ def _get_relevant_context(msg: str) -> str:
     terms = set(words)
     terms.update(f"{words[i]} {words[i+1]}" for i in range(len(words) - 1))
 
+    MAX_ROWS_PER_TABLE = 5  # cap to keep prompt fast
     sections = []
     for label, rows in _ALL_ROWS.items():
         if not rows:
@@ -83,7 +84,7 @@ def _get_relevant_context(msg: str) -> str:
         matched = [r for r in rows[1:] if any(t in " ".join(r).upper() for t in terms)]
         if not matched:
             continue
-        block = "\n".join(" | ".join(c.strip() for c in r) for r in [header] + matched)
+        block = "\n".join(" | ".join(c.strip() for c in r) for r in [header] + matched[:MAX_ROWS_PER_TABLE])
         sections.append(f"=== {label} ===\n{block}")
 
     return "\n\n".join(sections) if sections else "(No matching reference terms — use tactical judgment.)"
@@ -213,7 +214,7 @@ def get_battle_assessment(
             {"role": "system", "content": _build_system_prompt(msg_content)},
             {"role": "user",   "content": f"TACTICAL MESSAGE: {msg_content}"},
         ],
-        "temperature": 0.2,
+        "temperature": 0,
         "stream": False,
     }
 

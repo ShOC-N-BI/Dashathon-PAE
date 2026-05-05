@@ -7,7 +7,7 @@ from ai.agent import get_battle_assessment
 from client.pae_sse_client import PaeSseClient
 from client.pae_output_client import submit as submit_pae_output
 from irc.listener import start as irc_start
-from output import log_writer
+from output import log_writer, db_writer, gbc_api_client
 from pipeline.builder import make_request_id
 from pipeline.filter import is_clean
 from schemas.pae_schemas import PaeInputCreated, PaeOutput
@@ -109,14 +109,33 @@ def run_pipeline(
     # -- Step 2: Write to local log (always, regardless of orchestrator availability)
     log_writer.write(tactical_json)
 
-    # -- Step 3: Forward to config server dashboard (fire and forget)
+    # -- Step 3: Write to database (only if DB credentials are configured in .env)
+    if config.DB_HOST and config.DB_NAME and config.DB_USER and config.DB_PASSWORD:
+        db_writer.insert(
+            tactical_json,
+            db_host=config.DB_HOST,
+            db_name=config.DB_NAME,
+            db_user=config.DB_USER,
+            db_password=config.DB_PASSWORD,
+            db_port=config.DB_PORT,
+        )
+    else:
+        print("INFO: DB not configured — skipping database write.")
+
+    # -- Step 4: Push to GBC API (only if GBC_API_URL is configured in .env)
+    if config.GBC_API_URL:
+        gbc_api_client.push(tactical_json, api_url=config.GBC_API_URL)
+    else:
+        print("INFO: GBC_API_URL not configured — skipping GBC push.")
+
+    # -- Step 5: Forward to config server dashboard (fire and forget)
     try:
         tactical_json[0]["_source"] = source
         requests.post("http://config:8080/assessment", json=tactical_json, timeout=2)
     except Exception:
         pass  # Dashboard is optional — never block the pipeline
 
-    # -- Step 4: Validate against PaeOutput schema and POST to orchestrator
+    # -- Step 6: Validate against PaeOutput schema and POST to orchestrator
     record = tactical_json[0]
     try:
         pae_output = PaeOutput.model_validate(record)
@@ -126,7 +145,7 @@ def run_pipeline(
         console.log(f"[red]Failed to submit to orchestrator: {e}[/red]")
         submit_status = "SUBMIT FAILED"
 
-    # -- Step 5: Update dashboard
+    # -- Step 7: Update dashboard
     effects  = record.get("battleEffects", [])
     verbs    = tuple(e.get("effectOperator", "?") for e in effects[:3])
     label    = record.get("label", "?")
@@ -191,8 +210,8 @@ if __name__ == "__main__":
         Panel(
             f"[bold cyan]IRC:[/bold cyan]          {config.IRC_SERVER}:{config.IRC_PORT}  {config.IRC_CHANNEL}\n"
             f"[bold cyan]Orchestrator:[/bold cyan] {config.ORCHESTRATOR_BASE_URL or 'NOT CONFIGURED'}\n"
-            f"[bold cyan]AI Provider:[/bold cyan]  {config.AI_PROVIDER.upper()}\n"
-            f"[bold cyan]Model:[/bold cyan]        {config.NANOGPT_MODEL if config.AI_PROVIDER == 'nanogpt' else config.LM_MODEL}\n"
+            f"[bold cyan]AI Endpoint:[/bold cyan]  {config.AI_ENDPOINT}\n"
+            f"[bold cyan]Model:[/bold cyan]        {config.AI_MODEL}\n"
             f"[bold cyan]DB:[/bold cyan]           {config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}",
             title="PAE — Pre-emptive Action Engine",
             border_style="cyan",
@@ -208,6 +227,7 @@ if __name__ == "__main__":
                 "server":     config.IRC_SERVER,
                 "port":       config.IRC_PORT,
                 "channel":    config.IRC_CHANNEL,
+                "nickname":   config.IRC_NICKNAME or None,
                 "on_message": lambda user, msg: on_irc_message(live, user, msg),
             },
             name="irc-listener",
@@ -223,9 +243,12 @@ if __name__ == "__main__":
         else:
             console.print("[yellow]ORCHESTRATOR_BASE_URL not set — SSE listener not started.[/yellow]")
 
-        # -- Main thread stays alive and handles shutdown
+        # -- Main thread stays alive indefinitely regardless of IRC/SSE state
+        # Using an Event instead of irc_thread.join() so the app never exits
+        # if IRC drops or fails to connect — it will keep retrying in the background
         try:
-            irc_thread.join()
+            stop_event = threading.Event()
+            stop_event.wait()  # blocks forever until KeyboardInterrupt
         except KeyboardInterrupt:
             console.print("\n[bold yellow]Shutting down PAE.[/bold yellow]")
             PaeSseClient.stop()

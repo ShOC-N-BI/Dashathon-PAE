@@ -10,32 +10,19 @@ load_dotenv(ENV_PATH)
 # ---------------------------------------------------------------------------
 # IRC
 # ---------------------------------------------------------------------------
-IRC_SERVER  = os.getenv("IRC_SERVER",  "10.5.185.72")
-IRC_PORT    = int(os.getenv("IRC_PORT", "6667"))
-IRC_CHANNEL = os.getenv("IRC_CHANNEL", "#app_dev")
+IRC_SERVER   = os.getenv("IRC_SERVER",   "10.5.185.72")
+IRC_PORT     = int(os.getenv("IRC_PORT", "6667"))
+IRC_CHANNEL  = os.getenv("IRC_CHANNEL",  "#app_dev")
+IRC_NICKNAME = os.getenv("IRC_NICKNAME", "")  # leave blank for random name
 
 # ---------------------------------------------------------------------------
-# AI Provider — choose which backend handles assessments
-# Set AI_PROVIDER to either "lmstudio" or "nanogpt"
+# AI — single endpoint, provider auto-detected from URL
+# Set AI_ENDPOINT to either LM Studio URL or NanoGPT URL
 # ---------------------------------------------------------------------------
-AI_PROVIDER = os.getenv("AI_PROVIDER", "lmstudio")
-
-# ---------------------------------------------------------------------------
-# LM Studio — local network LLM server
-# ---------------------------------------------------------------------------
-LM_MODEL_FAST = "google/gemma-4-e4b"
-LM_MODEL_FULL = "google/gemma-4-31b"
-
-LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://10.5.185.55:4334/v1/chat/completions")
-LM_MODEL      = os.getenv("LM_MODEL",      LM_MODEL_FAST)
-LM_TIMEOUT    = int(os.getenv("LM_TIMEOUT", "60"))  # 60s default — NanoGPT cloud calls need more time
-
-# ---------------------------------------------------------------------------
-# NanoGPT — cloud API
-# ---------------------------------------------------------------------------
-NANOGPT_API_URL = os.getenv("NANOGPT_API_URL", "https://nano-gpt.com/api/v1/chat/completions")
-NANOGPT_API_KEY = os.getenv("NANOGPT_API_KEY", "")
-NANOGPT_MODEL   = os.getenv("NANOGPT_MODEL",   "gpt-4o")
+AI_ENDPOINT = os.getenv("AI_ENDPOINT", "http://10.5.185.55:4334/v1/chat/completions")
+AI_MODEL    = os.getenv("AI_MODEL",    "google/gemma-4-e4b")
+AI_API_KEY  = os.getenv("AI_API_KEY",  "")
+AI_TIMEOUT  = int(os.getenv("AI_TIMEOUT", "60"))
 
 # ---------------------------------------------------------------------------
 # Orchestrator — central hub for the app cluster
@@ -50,9 +37,9 @@ SSE_URL         = os.getenv("SSE_URL", "")
 SSE_RETRY_DELAY = int(os.getenv("SSE_RETRY_DELAY", "5"))
 
 # ---------------------------------------------------------------------------
-# Battle API
+# GBC API — external endpoint to push mapped assessment output to
 # ---------------------------------------------------------------------------
-BATTLE_API_URL = os.getenv("BATTLE_API_URL", "")
+GBC_API_URL = os.getenv("GBC_API_URL", "")  # e.g. http://10.5.185.29:3016/paeoutputs
 
 # ---------------------------------------------------------------------------
 # Database
@@ -66,51 +53,44 @@ DB_PORT     = int(os.getenv("DB_PORT", "5432"))
 
 # ---------------------------------------------------------------------------
 # LIVE RELOAD
-# Reads .env fresh from disk — call this before any setting that
-# can be changed at runtime via the config UI (port 8080).
+# Reads .env fresh from disk on every call so changes made via the config UI
+# take effect on the next message without restarting the container.
 # ---------------------------------------------------------------------------
+
+def _detect_provider(url: str) -> str:
+    """nano-gpt.com in the URL = nanogpt, anything else = lmstudio."""
+    return "nanogpt" if "nano-gpt.com" in url else "lmstudio"
+
 
 def get_ai_config() -> dict:
     """
-    Read AI provider settings directly from .env every time.
-    This allows live switching between LM Studio and NanoGPT
-    via the config UI without restarting the container.
+    Read AI settings directly from .env every time this is called.
+    Provider is automatically detected from the endpoint URL:
+      - http://10.5.185.55:4334/...  → lmstudio (no API key needed)
+      - https://nano-gpt.com/...     → nanogpt   (API key required)
     """
-    # Try multiple possible .env locations (local dev vs Docker container)
-    possible_paths = [
-        ENV_PATH,
-        Path("/app/.env"),
-        Path(".env"),
-    ]
+    # Try multiple possible .env locations
     values = {}
-    for p in possible_paths:
+    for p in [ENV_PATH, Path("/app/.env"), Path(".env")]:
         if p.exists():
             values = dotenv_values(p)
-            print(f"CONFIG: loaded .env from {p}  keys={list(values.keys())}")
             break
 
-    # Also check environment variables directly as a fallback
-    # (docker-compose env_file injects them into the process environment)
-    provider = (values.get("AI_PROVIDER") or os.getenv("AI_PROVIDER") or AI_PROVIDER).strip().lower()
-    print(f"CONFIG: AI_PROVIDER resolved to '{provider}'")
-
     def _get(key, default):
-        """Get from .env file first, then process env, then hardcoded default."""
         return values.get(key) or os.getenv(key) or default
 
-    if provider == "nanogpt":
-        return {
-            "provider": "nanogpt",
-            "url":      _get("NANOGPT_API_URL", NANOGPT_API_URL),
-            "model":    _get("NANOGPT_MODEL",   NANOGPT_MODEL),
-            "api_key":  _get("NANOGPT_API_KEY", NANOGPT_API_KEY),
-            "timeout":  int(_get("LM_TIMEOUT",  str(LM_TIMEOUT))),
-        }
-    else:
-        return {
-            "provider": "lmstudio",
-            "url":      _get("LM_STUDIO_URL", LM_STUDIO_URL),
-            "model":    _get("LM_MODEL",      LM_MODEL),
-            "api_key":  "",
-            "timeout":  int(_get("LM_TIMEOUT", str(LM_TIMEOUT))),
-        }
+    endpoint = _get("AI_ENDPOINT", AI_ENDPOINT)
+    model    = _get("AI_MODEL",    AI_MODEL)
+    api_key  = _get("AI_API_KEY",  AI_API_KEY)
+    timeout  = int(_get("AI_TIMEOUT", str(AI_TIMEOUT)))
+    provider = _detect_provider(endpoint)
+
+    print(f"CONFIG: provider={provider.upper()}  endpoint={endpoint}  model={model}  key_set={bool(api_key)}")
+
+    return {
+        "provider": provider,
+        "url":      endpoint,
+        "model":    model,
+        "api_key":  api_key,
+        "timeout":  timeout,
+    }
