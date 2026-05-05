@@ -1,0 +1,123 @@
+Abbreviation,Meaning
+*,Used to make an immediate correction to a previous posting
+***,Used to denote a very important person is onboard a specific aircraft
+.,"Used to check server or user connectivity; if received, reply with two periods"
+..,Response to a single period
+A/C,aircraft
+A/F,as fragged or airfield depending on context
+A/S,airspace
+AAR,1. after action review 2. air-to-air refueling
+ABN,airborne
+AFFIRM,affirmative
+AFK,away from keyboard
+APPR,Approved
+ARR,arrived
+ATA,actual time of arrival
+ATD,actual time of departure
+ATT,at this time (use now)
+BOLO,be on the lookout for
+C,copy (acknowledgment of receipt)
+C/S,call sign
+"CANX, CNX",cancel
+CDR,commander
+CHAT,The process of communicating via text in a specific tactical chat (TC) room
+Chat room/Channel,A single TC forum with participants communicating
+CIP,come in please (generally used when initiating whispers)
+CK,check
+CLR,clear
+COMM,communications
+CONSOL,consolidate
+D/O,drop off
+DC,disconnected
+DE,from
+decon,deconflict or decontaminate depending on context
+DEP,departed
+DZ,drop zone
+elev,ELEVATOR
+enrt,en route
+EOM,end of mission
+ETA,estimated time of arrival
+ETD,estimated time of departure
+fc,frequency change
+ff,flight following
+fl,flight level (altitude in hundreds of feet)
+g2w,good two-way communication
+gt,good test (reply to a “t” (test) connectivity check request)
+hc,how copy
+HVT,high-value target
+i+,(air refueling) instantaneous fuel available
+ib,inbound
+IFE,in-flight emergency
+IFR,instrument flight rules or in-flight report depending on context
+imm,Immediate
+iso,in support of
+ivo,in the vicinity of
+k,request to acknowledge transmission
+LKP,last known position
+LL,lost link (unmanned aircraft system)
+lnd,landed
+LZ,landing zone
+MAXORD,maximum ordinate
+mc,mission complete
+"medevac, medevac, medevac",preparatory command to clear the TC channel; followed by a 9-line MEDEVAC request
+message,single entry of text communication via TC
+msn,mission
+mx or maint,maintenance
+neg,negative
+net,a communication network defined by an operation order or unit standard operating procedure
+nvm,never mind
+nstr,nothing significant to report
+o/c,on channel
+o/n,operations normal
+o/s,on station
+o/t,on tank (air refueling)
+ob,outbound
+osr,operating outside the restricted operations zone (ROZ)
+pls,please
+poi,point of injury/impact
+poo,point of origin
+pos,position
+post,single entry of text communication via TC
+PRI,priority
+r/r,radar/IFF contact and radio communication established
+rar,received and read
+RCVR,aircraft receiving air refueling
+rgr,roger
+rhr,ROZ hot request
+rip,relief in place
+rnds,rounds
+RON,remain overnight
+ROZ,restricted operations zone
+RP,release point
+rqst,Request
+RTB,return to base
+RTD,return to duty
+rtn,routine
+"RX, rcv",Receive (rcv is used in reference to goods)
+s/f,show of force
+sfc,surface
+SIPR,SECRET Internet Protocol Router (secure network)
+sod,safe on deck
+SOF,special operations forces
+sp,start point
+stby,standby
+t,test (request for a connectivity check)
+t/o,takeoff
+"thx, tks",thank you
+tic,troops in contact
+tn,datalink track number
+TOT,time on target
+TST,time-sensitive target
+TX,transmit
+UI,unique identifier
+unk,unknown
+urg,urgent
+urgsurg,urgent surgical
+VFR,visual flight rules
+w/d,wheels down
+w/u,wheels up
+wkg,working
+wrt,with regard to
+wspr,whisper
+WX,weather
+yw,you’re welcome

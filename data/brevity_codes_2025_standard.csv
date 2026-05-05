@@ -1,0 +1,111 @@
+Term,Services,Definition
+ABORT,[A/S],Directive to cease action/attack/event/mission.
+ANCHOR,[ALL],Orbit about a specific point; refueling track flown by tanker.
+ANGELS,[A/A],Height of friendly aircraft in thousands of feet mean sea level (MSL).
+ANYFACE,[ALL],FRIENDLY command and control agency when call sign is not known.
+ARIZONA,[A/S],No ARM ordnance remaining.
+AS FRAGGED,[ALL],Unit or element will be performing exactly as stated by the air tasking order.
+AUTHENTICATE,[ALL],To request or provide a response to a coded challenge.
+AUTOCAT,[ALL],Any communications relay using automatic retransmissions.
+(weapon) AWAY,[ALL],Release/launch of specified weapon.
+AZIMUTH,[A/A],A picture label describing two groups separated laterally.
+BAD MAP,[A/S],"Informative call that the displayed map is unusable due to contrast/resolution/terrain masking, etc."
+BANDIT,[A/A] [AIR-MAR],Positively identified as an enemy IAW theater identification criteria. The term does not imply direction or authority to engage.
+BANZAI,[A/A],Execute(ing) launch and decide tactics with the intent to maneuver into the visual arena.
+BASE [+/- number],[ALL],"Reference number used to indicate such information as altitude, fuel, or distance from a reference point."
+BAT(S),[A/S],"FRIENDLY net-enabled glide weapon(s) with weapon-to-weapon communication capability (e.g., SDB II)."
+BAY,[EW],Carry out deception plan indicated or IAW previous orders.
+BEAD WINDOW,[ALL],Last transmission potentially disclosed unauthorized information.
+BEAM [direction],[A/A],CONTACT stabilized within 60-109 degrees of aspect.
+BEAM RIDER [direction],[A/A] [A/S],Potential JAMMER along the stated azimuth/direction.
+[system] BENT,[ALL],System indicated is inoperative. Cancelled by SWEET.
+BERETTA,[A/S],Aircraft is out of or unable to employ long-range precision guided munitions.
+BIG STICK,[S/A],FRIENDLY long-range surface-to-air missile (SAM).
+BINGO,[ALL],Prebriefed fuel state needed for recovery.
+BIRD(S) [S/A],[S/A],"FRIENDLY surface-to-air missile(s). Modifiers include: AWAY, DEFEATED, ENGAGED."
+BIRDDOG,[ALL],"Call to configure sensors IAW mission-specific instructions (e.g., for target tracking)."
+BITTERSWEET,[ALL],Notification of potential for blue-on-blue (friendly fire) situation.
+BLACKOUT,[A/S],Directive to turn off all external aircraft lighting.
+BLIND,[ALL],No visual contact with FRIENDLY aircraft/ground position; opposite of VISUAL.
+BLOW THROUGH,[A/A],Directive or informative call that indicates aircraft will continue straight ahead at the merge and not become anchored with target/targets.
+BOGEY,[A/A] [S/A],A radar or visual air contact whose identity is unknown.
+BRAA,[A/A] [S/A],"Tactical control format providing Bearing, Range, Altitude, and Aspect relative to the specified FRIENDLY aircraft."
+BRUISER,[A/S] [AIR-MAR],FRIENDLY air-launched anti-ship missile.
+BUDDY LOCK,[A/A],Radar locked to a known FRIENDLY aircraft. Response to a SPIKE or BUDDY SPIKE call.
+BUDDY SPIKE,[A/A],FRIENDLY aircraft air-to-air radar track indication on radar warning receiver (RWR).
+BULLSEYE,[ALL],An established reference point from which the position of an object can be referenced by bearing (magnetic) and range (nm).
+BUSTER,[ALL],Directive to fly at maximum continuous speed (military power).
+CAP [location],[A/A],Directive call to establish a combat air patrol at a specified point.
+CAPPING [location],[A/A],Descriptive term for aircraft in a CAP.
+CAPTURED,[A/S],Aircrew has acquired and is able to track a specified ground target with an onboard sensor.
+CHEAPSHOT,[A/A],Active missile data link terminated between high and medium pulse repetition frequency active.
+CLEAN,[A/A] [S/A],No sensor information on a GROUP of interest.
+CLEARED HOT,[A/S] [S/S],Ordnance release is authorized. Typically used in CAS.
+CLEARED TO ENGAGE,[A/S] [S/A],Used by JTAC/FAC(A) to grant weapons release authority in Type 3 control.
+CLOAK,[ALL],Directive/informative call to switch from normal/overt external lighting to covert NVD-only lighting.
+CLOSING,[A/A],Decreasing in separation.
+COLD,[A/A],Initiate turn in the CAP away from the anticipated threats.
+COLOR [system],[ALL],Request for information on a system at stated location; implies a request for ambiguity resolution.
+COMMIT,[A/A] [S/A],Directive call to intercept a GROUP of interest.
+CONTACT,[ALL],Sensor contact at the stated position.
+CONTINUE,[A/S],Continue present maneuver; does not imply a change in clearance to engage or expend ordnance.
+CRUISE,[ALL],Return to cruise speed after BUSTER or GATE.
+DEADSTICK,[ALL],Directive or informative call indicating a loss of all engine power.
+DEFENDING [direction],[A/A] [S/A],Aircraft is in a defensive maneuver and reacting to a threat.
+DETAILS,[A/S],Request for additional target information/description.
+DRAG [direction],[A/A],CONTACT stabilized at 0-60 degrees aspect.
+DOUBLE TAP,[A/S],Two weapons employed against the same target.
+ELEVATOR,[ALL],Directive to change altitude to the stated level.
+FADED,[A/A] [S/A],Sensor data is lost on GROUP or CONTACT.
+FLANK [direction],[A/A],CONTACT stabilized at 120-150 degrees aspect.
+FLASHLIGHT,[A/S],Directive to turn on IR floodlight or searchlight.
+FOX [1/2/3],[A/A],"Simulated or actual launch of air-to-air weapons (1=Semi-active, 2=IR, 3=Active)."
+GADGET,[ALL],Radar or emitter equipment.
+GATE,[ALL],"Fly as fast as possible, using reheat/afterburner."
+GIMBAL,[A/A],Sensor target is approaching azimuth or elevation tracking limits.
+GO ACTIVE,[ALL],Go to briefed radio frequency/channel using hopping/secure crypto.
+HITS,[A/A],Momentary radar return(s).
+HOT,[A/A],Turn in the CAP toward the anticipated threat.
+HUSKY,[A/A],Active radar missile is at high pulse repetition frequency (HPRF) active range.
+JESTER [color],[A/S],Ground-based laser designator is on.
+JOKER,[ALL],Fuel status above BINGO at which separation or termination should begin.
+LAME DUCK,[ALL],An aircraft in a minor state of emergency.
+LEEROY,[A/S],Air-to-ground ordnance release without specific coordination (emergency/tactical).
+LIGHTS [ON/OFF],[ALL],Directive to turn on/off all external lights.
+LINER,[ALL],Fly at speed giving maximum cruising range.
+LONG RIFLE,[A/S],"FRIENDLY long-range air-to-surface missile (e.g., AGM-130)."
+LOWDOWN,[ALL],A request for the tactical ground picture in an area of interest.
+MATE,[A/A],Directive to join formation.
+MELD,[A/A],Bias radar coverage and scan volume to gain situation awareness on the assigned GROUP.
+MICKEY,[ALL],HAVE QUICK time-of-day (TOD) signal.
+MUD [type/dir],[S/A] [EW],RWR ground threat indication with no launch indication.
+NAILS [direction],[A/A],RWR indication of AI radar in search.
+NAKED,[A/A],No RWR indications.
+PITBULL,[A/A],Active radar missile is at medium pulse repetition frequency (MPRF) active range.
+REMINGTON,[A/A] [A/S],No air-to-air or air-to-surface ordnance remaining except for self-protection.
+RIFLE,[A/S],FRIENDLY air-to-surface missile launch.
+ROLEX,[ALL],Timeline adjustment in minutes; always a delay from planned time.
+ROOSTER,[A/S],FRIENDLY net-enabled weapon.
+SCORPION,[A/S],Target has been designated for an overhead attack.
+SHACKLE,[A/A],One weave; a single crossing of flight paths.
+SKATE,[A/A],Execute(ing) launch and leave tactics.
+SLICE,[A/A],Perform high-G descending turn in the stated direction.
+SMACK,[A/S],Clearance to employ ordnance/fires on surface target coordinates.
+SNIPER,[A/S],Aircraft is using a targeting pod.
+SORT,[A/A],Assignment of responsibility within a GROUP.
+SOUR,[ALL],Equipment indicated is operating inefficiently (opposite of SWEET).
+SPIKE(D),[A/A] [S/A],RWR indication of an AI threat in track or launch.
+SPLASH(ED),[A/A] [A/S],Target destroyed.
+SPREAD,[A/A],Directive to enter a tactical spread formation.
+STROBE(S),[A/A],Radar indication(s) of noise jamming.
+SWEET,[ALL],Equipment indicated is operating efficiently.
+TIGER,[A/A],Enough fuel and ordnance to accept a commitment.
+TIMEOUT,[A/A] [A/S],Shooter assesses valid BVR shot parameters have been met and missile has reached termination.
+TRASHED,[A/A],FRIENDLY missile defeated.
+TSUNAMI,[A/S],A large-scale synchronized air-to-ground strike.
+TWEET(ING),[ALL],Data link communication occurring.
+VANISHED,[A/A] [S/A],Special case of FADED where contact is lost after a shot.
+WATCHING,[A/A] [A/S],Maintain sensor track on the specified object.
+WAVE,[A/A],Directive to separate and re-engage.
+WORDS,[ALL],Directive or request for further information or directives.
+ZIPLIP,[ALL],Limit transmissions to critical information only.
