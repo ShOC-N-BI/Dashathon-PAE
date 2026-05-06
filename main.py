@@ -9,7 +9,7 @@ from client.pae_output_client import submit as submit_pae_output
 from irc.listener import start as irc_start
 from output import log_writer, db_writer, gbc_api_client
 from pipeline.builder import make_request_id
-from pipeline.filter import is_clean
+from pipeline.triage import is_relevant
 from schemas.pae_schemas import PaeInputCreated, PaeOutput
 
 from datetime import datetime
@@ -83,18 +83,27 @@ def run_pipeline(
     request_id : Unique track ID for this assessment.
     gbc_id     : Optional GBC ID from the SSE trigger (None for IRC messages).
     """
-    if not is_clean(message):
-        live.update(make_dashboard(message, username, None, "FILTERED (NOISE)", source))
+    live.update(make_dashboard(message, username, None, "TRIAGING...", source))
+
+    # -- Step 1: Read AI config fresh from .env (allows live UI switching)
+    ai = config.get_ai_config()
+
+    # -- Step 2: Triage — AI decides if message is tactically relevant
+    # Fail-open: if triage errors or times out, message passes through
+    if not is_relevant(
+        message=message,
+        triage_url=ai["triage_url"],
+        triage_model=ai["triage_model"],
+        api_key=ai["api_key"],
+        timeout=ai["triage_timeout"],
+    ):
+        live.update(make_dashboard(message, username, None, "FILTERED — NOT TACTICAL", source))
         return
 
     live.update(make_dashboard(message, username, None, "THINKING...", source))
-
-    # -- Step 1: AI assessment → raw battle JSON dict
-    # Read provider config fresh from .env on every call so live UI
-    # changes (port 8080) take effect immediately without a restart.
-    ai = config.get_ai_config()
     print(f"USING PROVIDER: {ai['provider'].upper()}  MODEL: {ai['model']}  URL: {ai['url']}  KEY_SET: {bool(ai['api_key'])}")
 
+    # -- Step 3: Full AI assessment
     tactical_json = get_battle_assessment(
         msg_content=message,
         username=username,

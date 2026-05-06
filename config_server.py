@@ -12,6 +12,7 @@ Routes:
     POST /assessment      — main.py posts each completed assessment here
     GET  /assessments     — returns full history as JSON
     GET  /assessments/sse — SSE stream for live dashboard updates
+    GET  /json             — raw JSON viewer tab
 """
 
 import json
@@ -73,6 +74,24 @@ EDITABLE_FIELDS = {
         "description": "X-API-Key sent with every orchestrator request",
         "placeholder": "your-api-key-here",
         "type":        "password",
+    },
+    "TRIAGE_ENDPOINT": {
+        "label":       "Triage Endpoint URL",
+        "description": "AI endpoint for triage calls — leave blank to use the same as AI Endpoint",
+        "placeholder": "https://nano-gpt.com/api/v1/chat/completions",
+        "type":        "url",
+    },
+    "TRIAGE_MODEL": {
+        "label":       "Triage Model",
+        "description": "Model for triage — use a fast cheap model e.g. gpt-4o-mini",
+        "placeholder": "gpt-4o-mini",
+        "type":        "text",
+    },
+    "TRIAGE_TIMEOUT": {
+        "label":       "Triage Timeout (seconds)",
+        "description": "Max time to wait for triage response — keep short (5-10s)",
+        "placeholder": "10",
+        "type":        "number",
     },
     "AI_ENDPOINT": {
         "label":       "AI Endpoint URL",
@@ -302,6 +321,11 @@ def serve_config():
 def serve_dashboard():
     return HTMLResponse(content=DASHBOARD_HTML)
 
+
+@app.get("/json", response_class=HTMLResponse)
+def serve_json_viewer():
+    return HTMLResponse(content=JSON_VIEWER_HTML)
+
 # ---------------------------------------------------------------------------
 # CONFIG UI HTML
 # ---------------------------------------------------------------------------
@@ -378,6 +402,7 @@ CONFIG_HTML = """<!DOCTYPE html>
   <nav>
     <a href="/" class="active">Config</a>
     <a href="/dashboard">Dashboard</a>
+    <a href="/json">JSON</a>
   </nav>
 </header>
 <main>
@@ -602,6 +627,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <nav>
     <a href="/">Config</a>
     <a href="/dashboard" class="active">Dashboard</a>
+    <a href="/json">JSON</a>
   </nav>
   <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
 </header>
@@ -726,6 +752,268 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
 
   loadHistory();connectSSE();
+</script>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
+# JSON VIEWER HTML
+# ---------------------------------------------------------------------------
+
+JSON_VIEWER_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAE JSON Viewer</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+    :root{
+      --bg:#060a0f;--surface:#0b1219;--surface2:#0f1a24;--border:#162030;
+      --accent:#00e5ff;--accent2:#ff6b35;--accent3:#7fff6b;--accent4:#a855f7;
+      --text:#b8ccd8;--muted:#3a5060;--mono:'Share Tech Mono',monospace;
+      --sans:'Rajdhani',sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden;}
+    body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,.008) 3px,rgba(0,229,255,.008) 4px);pointer-events:none;z-index:1000;}
+    header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+    .logo{display:flex;align-items:center;gap:12px;}
+    .logo-badge{width:34px;height:34px;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--accent);}
+    .logo-text{font-size:14px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--accent);}
+    .logo-sub{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;}
+    nav{display:flex;gap:4px;}
+    nav a{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:8px 16px;border:1px solid transparent;transition:.2s;}
+    nav a:hover{color:var(--accent);border-color:var(--border);}
+    nav a.active{color:var(--accent);border-color:var(--accent);background:rgba(0,229,255,.05);}
+    .live-badge{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--accent3);}
+    .dot{width:6px;height:6px;border-radius:50%;background:var(--accent3);animation:blink 1.2s infinite;}
+    @keyframes blink{0%,100%{opacity:1;}50%{opacity:.2;}}
+
+    main{max-width:1200px;margin:0 auto;padding:32px;}
+
+    .toolbar{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+    .section-label{font-family:var(--mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:12px;flex:1;}
+    .section-label::after{content:'';flex:1;height:1px;background:var(--border);}
+    .btn{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:8px 18px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:.2s;}
+    .btn:hover{border-color:var(--accent);color:var(--accent);}
+    .btn.active{border-color:var(--accent);color:var(--accent);background:rgba(0,229,255,.05);}
+    .btn-copy{border-color:var(--accent4);color:var(--accent4);}
+    .btn-copy:hover{background:rgba(168,85,247,.08);}
+    .btn-clear{border-color:var(--accent2);color:var(--accent2);}
+    .btn-clear:hover{background:rgba(255,107,53,.08);}
+
+    .record-list{display:flex;flex-direction:column;gap:12px;}
+
+    .record{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);overflow:hidden;}
+    .record.new{border-left-color:var(--accent3);animation:flash .4s ease;}
+    @keyframes flash{0%{background:rgba(127,255,107,.06);}100%{background:var(--surface);}}
+
+    .record-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;user-select:none;gap:12px;}
+    .record-header:hover{background:rgba(255,255,255,.02);}
+    .record-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    .record-label{font-size:14px;font-weight:700;color:var(--accent);}
+    .record-id{font-family:var(--mono);font-size:10px;color:var(--muted);}
+    .record-time{font-family:var(--mono);font-size:10px;color:var(--muted);}
+    .record-source{font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--border);padding:2px 8px;text-transform:uppercase;}
+    .record-actions{display:flex;gap:8px;align-items:center;flex-shrink:0;}
+    .btn-sm{font-family:var(--mono);font-size:10px;letter-spacing:1px;padding:4px 12px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:.2s;text-transform:uppercase;}
+    .btn-sm:hover{border-color:var(--accent4);color:var(--accent4);}
+    .toggle-arrow{font-family:var(--mono);font-size:11px;color:var(--accent);}
+
+    .record-body{display:none;border-top:1px solid var(--border);}
+    .record-body.open{display:block;}
+
+    .json-block{
+      background:var(--bg);
+      padding:20px;
+      overflow-x:auto;
+      font-family:var(--mono);
+      font-size:12px;
+      line-height:1.7;
+      white-space:pre;
+      color:var(--text);
+    }
+
+    /* Syntax highlight colours */
+    .j-key{color:var(--accent);}
+    .j-str{color:var(--accent3);}
+    .j-num{color:var(--accent2);}
+    .j-bool{color:var(--accent4);}
+    .j-null{color:var(--muted);}
+
+    .empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:48px;text-align:center;border:1px dashed var(--border);}
+
+    .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;font-family:var(--mono);font-size:11px;letter-spacing:1px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent3);color:var(--accent3);transform:translateY(20px);opacity:0;transition:.3s;z-index:999;}
+    .toast.show{transform:translateY(0);opacity:1;}
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-badge">PAE</div>
+    <div><div class="logo-text">JSON Viewer</div><div class="logo-sub">Pre-emptive Action Engine</div></div>
+  </div>
+  <nav>
+    <a href="/">Config</a>
+    <a href="/dashboard">Dashboard</a>
+    <a href="/json" class="active">JSON</a>
+  </nav>
+  <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
+</header>
+
+<main>
+  <div class="toolbar">
+    <div class="section-label">Assessment Output</div>
+    <button class="btn btn-copy" onclick="copyAll()">Copy Latest</button>
+    <button class="btn btn-clear" onclick="clearAll()">Clear</button>
+  </div>
+  <div class="record-list" id="records">
+    <div class="empty" id="empty-msg">Waiting for assessments...</div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const recordsEl = document.getElementById('records');
+  const emptyEl   = document.getElementById('empty-msg');
+  const statusEl  = document.getElementById('live-status');
+  let allRecords  = [];
+
+  // ── Syntax highlighter ────────────────────────────────────────────────
+  function highlight(json) {
+    return json
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/("(\\.|[^"\\])*") *:/g, '<span class="j-key">$1</span>:')
+      .replace(/: *("(\\.|[^"\\])*")/g, ': <span class="j-str">$1</span>')
+      .replace(/: *(-?[0-9]+\.?[0-9]*)/g, ': <span class="j-num">$1</span>')
+      .replace(/: *(true|false)/g, ': <span class="j-bool">$1</span>')
+      .replace(/: *(null)/g, ': <span class="j-null">$1</span>');
+  }
+
+  function timeStr(iso){
+    if(!iso) return '';
+    return new Date(iso).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+
+  // ── Build record element ──────────────────────────────────────────────
+  function buildRecord(r, isNew) {
+    const pretty  = JSON.stringify(r, null, 2);
+    const id      = r.requestId || r.id || '?';
+    const label   = r.label || 'Assessment';
+    const source  = (r._source || (r.originator === 'SSE' ? 'SSE' : 'IRC')).toUpperCase();
+    const time    = timeStr(r._receivedAt || r.lastUpdated);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'record' + (isNew ? ' new' : '');
+    wrap.dataset.json = pretty;
+
+    wrap.innerHTML = `
+      <div class="record-header" onclick="toggleRecord(this)">
+        <div class="record-meta">
+          <span class="record-label">${esc(label)}</span>
+          <span class="record-source">${source}</span>
+          <span class="record-id">${esc(id)}</span>
+          <span class="record-time">${time}</span>
+        </div>
+        <div class="record-actions">
+          <button class="btn-sm" onclick="copyRecord(event, this)">Copy</button>
+          <span class="toggle-arrow">▼</span>
+        </div>
+      </div>
+      <div class="record-body open">
+        <div class="json-block">${highlight(pretty)}</div>
+      </div>`;
+
+    return wrap;
+  }
+
+  function toggleRecord(hdr) {
+    const body  = hdr.nextElementSibling;
+    const arrow = hdr.querySelector('.toggle-arrow');
+    const open  = body.classList.toggle('open');
+    arrow.textContent = open ? '▼' : '▶';
+  }
+
+  function copyRecord(e, btn) {
+    e.stopPropagation();
+    const json = btn.closest('.record').dataset.json;
+    navigator.clipboard.writeText(json).then(() => showToast('Copied to clipboard'));
+  }
+
+  function copyAll() {
+    if (!allRecords.length) { showToast('Nothing to copy'); return; }
+    navigator.clipboard.writeText(JSON.stringify(allRecords[0], null, 2))
+      .then(() => showToast('Latest JSON copied'));
+  }
+
+  function clearAll() {
+    allRecords = [];
+    recordsEl.innerHTML = '';
+    recordsEl.appendChild(emptyEl);
+    emptyEl.style.display = 'block';
+  }
+
+  function addRecord(r, isNew) {
+    emptyEl.style.display = 'none';
+    allRecords.unshift(r);
+    const el = buildRecord(r, isNew);
+    recordsEl.insertBefore(el, recordsEl.firstChild);
+  }
+
+  function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = '✓  ' + msg;
+    t.className = 'toast show';
+    setTimeout(() => { t.className = 'toast'; }, 2500);
+  }
+
+  // ── Load history ──────────────────────────────────────────────────────
+  async function loadHistory() {
+    try {
+      const res  = await fetch('/assessments');
+      const data = await res.json();
+      if (data.length) {
+        data.forEach(r => addRecord(r, false));
+        // Collapse all except the first on load
+        const bodies = recordsEl.querySelectorAll('.record-body');
+        bodies.forEach((b, i) => {
+          if (i > 0) {
+            b.classList.remove('open');
+            b.previousElementSibling.querySelector('.toggle-arrow').textContent = '▶';
+          }
+        });
+      }
+    } catch(e) {}
+  }
+
+  // ── SSE connection ────────────────────────────────────────────────────
+  function connectSSE() {
+    const es = new EventSource('/assessments/sse');
+    es.onopen = () => {
+      statusEl.textContent = 'LIVE';
+      statusEl.style.color = 'var(--accent3)';
+    };
+    es.onmessage = (e) => {
+      if (!e.data || e.data.trim() === '') return;
+      try { addRecord(JSON.parse(e.data), true); } catch(err) {}
+    };
+    es.onerror = () => {
+      statusEl.textContent = 'RECONNECTING...';
+      statusEl.style.color = 'var(--accent2)';
+      es.close();
+      setTimeout(connectSSE, 3000);
+    };
+  }
+
+  loadHistory();
+  connectSSE();
 </script>
 </body>
 </html>"""

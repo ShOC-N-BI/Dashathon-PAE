@@ -1,5 +1,6 @@
 import csv
 import json
+import uuid
 import re
 import requests
 from datetime import datetime, timezone
@@ -46,6 +47,12 @@ BATTLE_DICTIONARY = {
         "RESCUE", "REPAIR", "SAVE", "RECOVER", "RETRIEVE", "FREE", "LIBERATE", "RELEASE",
         "PROTECT", "SHIELD", "EVADE", "AVOID", "CIRCUMVENT", "CONCEAL", "ELUDE", "ESCAPE",
         "FEND OFF", "FLEE", "HIDE", "AVALANCHE", "FLASHLIGHT",
+    ],
+    "SUPPLY": [
+        "RESUPPLY", "REARM", "REFUEL", "REFIT", "REPLENISH", "SUSTAIN", "DELIVER", "TRANSPORT",
+        "DISTRIBUTE", "STOCKPILE", "CACHE", "PROVISION", "EQUIP", "LOAD", "UNLOAD", "STAGE",
+        "FORWARD", "PUSH", "PULL", "REQUISITION", "ALLOCATE", "DISPATCH", "CONVOY", "AIRLIFT",
+        "AIRDROP", "OFFLOAD", "PREPOSITION", "CONSOLIDATE", "TRANSFER", "ROTATE",
     ],
 }
 
@@ -104,7 +111,7 @@ Your job is to analyse an incoming tactical message and return a SINGLE fully po
 
 RULES:
 1. effectOperator values MUST come exclusively from the APPROVED VERB LIST. No other words.
-2. Use a DIFFERENT category (ATTACK / INVESTIGATE / DEGRADE / RESCUE) for each effect slot where possible.
+2. Use a DIFFERENT category (ATTACK / INVESTIGATE / DEGRADE / RESCUE / SUPPLY) for each effect slot where possible.
    Never use the exact same verb twice.
 3. e01 = highest priority (recommended: true), e02 = secondary, e03 = tertiary.
 4. All descriptive fields must be concise and tactically relevant to the message.
@@ -224,7 +231,7 @@ def get_battle_assessment(
     def _envelope(ai_fields: dict) -> list:
         """Wrap AI-generated fields in the full battle JSON envelope."""
         return [{
-            "id": username,
+            "id": str(uuid.uuid4()),
             "requestId": request_id,
             "label": ai_fields.get("label", "Tactical Update"),
             "description": ai_fields.get("description", ""),
@@ -237,14 +244,14 @@ def get_battle_assessment(
                 "PAE generated for pre-emptive and defensive options.",
             ],
             "isDone": False,
-            "originator": username,
+            "originator": "rhino",
             "lastUpdated": now,
         }]
 
     def _error_record(reason: str) -> list:
         """Return a minimal record when the AI call fails entirely."""
         return [{
-            "id": username,
+            "id": str(uuid.uuid4()),
             "requestId": request_id,
             "label": "ERROR",
             "description": reason,
@@ -258,14 +265,14 @@ def get_battle_assessment(
             ],
             "chat": [msg_content, "PAE generation failed."],
             "isDone": False,
-            "originator": username,
+            "originator": "rhino",
             "lastUpdated": now,
         }]
 
     def _no_pae_record() -> list:
         """Return a minimal record when the AI determines no action is required."""
         return [{
-            "id": username,
+            "id": str(uuid.uuid4()),
             "requestId": request_id,
             "label": "NO PAE ACTION REQUIRED",
             "description": "Message assessed — no pre-emptive or defensive action warranted.",
@@ -279,7 +286,7 @@ def get_battle_assessment(
             ],
             "chat": [msg_content, "PAE generated for pre-emptive and defensive options."],
             "isDone": False,
-            "originator": username,
+            "originator": "rhino",
             "lastUpdated": now,
         }]
 

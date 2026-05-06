@@ -12,38 +12,37 @@
 ;;II::;II::;I::,;;;;::;;I,:;;I;;;;;:";;;:";;;;::;;;::;;;:,I;;:,;;::,;I
 ```
 
-A tactical AI microservice that listens to J-chat messages from IRC and reassessment triggers from an orchestrator cluster via SSE. Every message is assessed by an AI, which assigns three prioritised effect operator verbs and populates a full battle JSON record. Results are pushed to the GBC API, the orchestrator, and optionally a PostgreSQL database.
+A tactical AI microservice that listens to J-chat messages from IRC and reassessment triggers from an orchestrator cluster via SSE. Every message is triaged by AI before being assessed. Relevant messages receive a full battle JSON assessment which is pushed to the GBC API, the orchestrator, and optionally a PostgreSQL database.
 
 ---
 
 ## How It Works — The Full Pipeline
 
-Every message that arrives — whether from IRC or an SSE trigger — passes through the same pipeline:
+Every message passes through a two-stage AI pipeline:
 
 ```
 Input (IRC or SSE)
     │
     ▼
-pipeline/filter.py       — noise filter (too short, garbled = discarded)
-    │
+pipeline/triage.py       — Stage 1: AI decides if message is tactically relevant
+    │ not relevant → discard (FILTERED — NOT TACTICAL)
+    │ relevant ↓
     ▼
-ai/agent.py              — AI assessment (NanoGPT or LM Studio)
+ai/agent.py              — Stage 2: Full AI battle assessment
     │
     ▼
 output/log_writer.py     — always writes to tactical_output.log
 output/db_writer.py      — inserts to PostgreSQL (if DB configured)
-output/gbc_api_client.py — POSTs to GBC API endpoint (if configured)
+output/gbc_api_client.py — POSTs full battle JSON to GBC API (if configured)
 config_server.py         — pushes to live dashboard
 client/pae_output_client.py — POSTs to orchestrator /paeoutputs
 ```
 
 There are two input paths:
 
-**Path 1 — IRC** — the bot joins your J-chat channel and listens for messages in real time. Every message from any user is picked up and run through the pipeline.
+**Path 1 — IRC** — the bot joins one or more J-chat channels and listens for messages in real time. Every message is triaged before reaching the full assessment.
 
-**Path 2 — SSE** — the orchestrator pushes a `PaeInputCreated` event to your app when another application in the cluster wants a message reassessed. The `trackId` field in that event contains the message text.
-
-Both paths call the exact same `run_pipeline()` function. The only difference is where the message came from.
+**Path 2 — SSE** — the orchestrator pushes a `PaeInputCreated` event when another application in the cluster wants a message reassessed. The `trackId` field contains the message text. Both paths call the same `run_pipeline()` function.
 
 ---
 
@@ -61,10 +60,10 @@ pae/
 ├── requirements.txt               # Python dependencies
 │
 ├── ai/
-│   └── agent.py                   # AI assessment engine
+│   └── agent.py                   # Full AI battle assessment engine
 │
 ├── client/
-│   ├── http_client.py             # Shared HTTP client for orchestrator
+│   ├── http_client.py             # Shared HTTP client for orchestrator requests
 │   ├── pae_sse_client.py          # SSE listener — receives retrigger events
 │   └── pae_output_client.py       # POSTs completed assessments to orchestrator
 │
@@ -72,14 +71,15 @@ pae/
 │   └── listener.py                # IRC bot — connects, joins channels, reads messages
 │
 ├── pipeline/
-│   ├── filter.py                  # Message noise filter
+│   ├── triage.py                  # Stage 1: AI relevance filter
+│   ├── filter.py                  # Legacy character filter (kept for reference)
 │   └── builder.py                 # Generates unique request IDs
 │
 ├── output/
 │   ├── log_writer.py              # Writes assessments to local log file
 │   ├── db_writer.py               # Inserts assessments into PostgreSQL
-│   ├── gbc_api_client.py          # Maps and POSTs to the GBC API endpoint
-│   └── api_push.py                # Generic API push (legacy — use gbc_api_client)
+│   ├── gbc_api_client.py          # POSTs full battle JSON to GBC API
+│   └── api_push.py                # Generic API push (legacy)
 │
 ├── schemas/
 │   └── pae_schemas.py             # Pydantic models for orchestrator data contracts
@@ -101,252 +101,215 @@ pae/
 
 ### `main.py` — Entry Point
 
-The top-level orchestrator. Starts all listeners and defines the pipeline.
-
-**`make_dashboard(...) → Table`**
-Builds the Rich terminal table that shows live activity. Displays timestamp, source (IRC/SSE), the raw message, the three AI verbs, and the current status. Called on every pipeline event to keep the terminal view current.
+**`make_dashboard(last_msg, last_user, verbs, status, source) → Table`**
+Builds the Rich terminal table showing live activity. Displays timestamp, source (IRC/SSE), raw message, three AI verbs, and current pipeline status. Updated on every event.
 
 **`run_pipeline(live, message, username, source, request_id, gbc_id)`**
-The core function. Every message from every source passes through here in order:
-1. Runs `is_clean()` — discards noise
-2. Calls `get_ai_config()` — reads the current AI provider and URL fresh from `.env`
-3. Calls `get_battle_assessment()` — sends message to AI, gets battle JSON back
-4. Calls `log_writer.write()` — saves to local log file
-5. Calls `db_writer.insert()` — saves to PostgreSQL (only if DB credentials set)
-6. Calls `gbc_api_client.push()` — POSTs to GBC API (only if `GBC_API_URL` set)
-7. POSTs to `config_server` dashboard — updates the browser UI
-8. Validates against `PaeOutput` schema and POSTs to orchestrator `/paeoutputs`
-9. Updates the terminal dashboard
+The core function every message passes through:
+1. Updates dashboard to `TRIAGING...`
+2. Calls `get_ai_config()` — reads AI and triage settings fresh from `.env`
+3. Calls `is_relevant()` — AI triage decides if message is tactically relevant. If not, discards with status `FILTERED — NOT TACTICAL`
+4. Updates dashboard to `THINKING...`
+5. Calls `get_battle_assessment()` — full AI assessment, returns battle JSON
+6. Calls `log_writer.write()` — saves to local log file
+7. Calls `db_writer.insert()` — saves to PostgreSQL (only if DB credentials set)
+8. Calls `gbc_api_client.push()` — POSTs to GBC API (only if `GBC_API_URL` set)
+9. POSTs to config server dashboard for browser UI update
+10. Validates against `PaeOutput` schema and POSTs to orchestrator `/paeoutputs`
+11. Updates terminal dashboard with result
 
 **`on_irc_message(live, username, message)`**
-Callback registered with the IRC listener. Called every time a message arrives from any monitored IRC channel. Generates a fresh `request_id` and hands off to `run_pipeline()`.
+Callback registered with the IRC listener. Called for every message from any monitored channel. Generates a new `request_id` and calls `run_pipeline()`.
 
 **`on_sse_event(live, event)`**
-Callback registered with `PaeSseClient`. Called every time the orchestrator sends a `PaeInputCreated` SSE event. Extracts the message text from `event.pae_input.track_id` and hands off to `run_pipeline()` using the `requestId` and `originator` from the SSE payload directly.
+Callback registered with `PaeSseClient`. Called for every `PaeInputCreated` SSE event from the orchestrator. Extracts the message from `event.pae_input.track_id` and calls `run_pipeline()` using the orchestrator's `requestId` and `originator` directly.
 
 ---
 
 ### `pae_config.py` — Configuration
 
-Loads settings from `.env` at startup. Also provides a live-reload function so the UI can change settings without restarting.
-
 **Module-level constants**
-`IRC_SERVER`, `IRC_PORT`, `IRC_CHANNEL`, `IRC_NICKNAME`, `AI_ENDPOINT`, `AI_MODEL`, `AI_API_KEY`, `AI_TIMEOUT`, `ORCHESTRATOR_BASE_URL`, `ORCHESTRATOR_API_KEY`, `GBC_API_URL`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT` — all loaded from `.env` once at startup via `load_dotenv()`.
+All loaded from `.env` at startup: `IRC_SERVER`, `IRC_PORT`, `IRC_CHANNEL`, `IRC_NICKNAME`, `AI_ENDPOINT`, `AI_MODEL`, `AI_API_KEY`, `AI_TIMEOUT`, `TRIAGE_ENDPOINT`, `TRIAGE_MODEL`, `TRIAGE_TIMEOUT`, `ORCHESTRATOR_BASE_URL`, `ORCHESTRATOR_API_KEY`, `GBC_API_URL`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT`.
 
 **`_detect_provider(url) → str`**
-Inspects the AI endpoint URL. If it contains `nano-gpt.com` returns `"nanogpt"`, otherwise returns `"lmstudio"`. This means you never have to set a separate provider flag — just paste the URL.
+Returns `"nanogpt"` if the URL contains `nano-gpt.com`, otherwise `"lmstudio"`. Provider is auto-detected from the URL — no separate flag needed.
 
 **`get_ai_config() → dict`**
-Reads `.env` fresh from disk every time it is called using `dotenv_values()`. This bypasses Python's module cache so changes made in the config UI take effect on the very next message without restarting the container. Returns a dict with `provider`, `url`, `model`, `api_key`, and `timeout`.
+Reads `.env` fresh from disk on every call using `dotenv_values()`. Bypasses Python's module cache so config UI changes take effect on the next message without restarting. Returns a dict with `provider`, `url`, `model`, `api_key`, `timeout`, `triage_url`, `triage_model`, and `triage_timeout`. If `TRIAGE_ENDPOINT` is blank, `triage_url` falls back to the main `AI_ENDPOINT`.
 
 ---
 
-### `ai/agent.py` — AI Assessment Engine
+### `pipeline/triage.py` — AI Triage Filter
 
-Handles everything related to sending a message to the AI and getting a structured battle JSON response back.
+Replaces the old character-count filter with a real AI judgement. Stage 1 of the two-stage pipeline.
+
+**`TRIAGE_PROMPT`**
+The system prompt sent to the triage AI. Defines what counts as tactically relevant (military units, coordinates, weapons, orders, intelligence reports, brevity codes) and what counts as noise (casual chat, IRC bot output, test messages). Instructs the model to return only `{"relevant": true}` or `{"relevant": false, "reason": "..."}`.
+
+**`is_relevant(message, triage_url, triage_model, api_key, timeout) → bool`**
+Sends the message to the triage AI and returns `True` if relevant, `False` if noise. Uses `temperature: 0` for fast deterministic responses. Strips markdown fences and extracts the JSON object from the response. Fail-open design — returns `True` on any error (timeout, connection failure, bad JSON) so messages are never silently lost due to triage failures. Prints `TRIAGE: RELEVANT` or `TRIAGE: NOISE` with the reason to the terminal.
+
+---
+
+### `ai/agent.py` — Full AI Assessment Engine
 
 **`BATTLE_DICTIONARY`**
-A dict of four categories (`ATTACK`, `INVESTIGATE`, `DEGRADE`, `RESCUE`), each containing a list of approved tactical verbs. The AI must choose its three effect operators exclusively from this list. If it returns anything outside the list it is replaced with `"NO PAE ACTION REQUIRED"`.
+Four categories of approved tactical verbs: `ATTACK`, `INVESTIGATE`, `DEGRADE`, `RESCUE`. The AI must choose all three effect operators exclusively from this list.
 
 **`ALL_VERBS`**
-A flat list of every verb across all four categories. Used to validate the AI's response and injected into the system prompt so the model knows exactly which words it is allowed to use.
+Flat list of all 153 approved verbs across all categories. Used for prompt injection and response validation.
 
 **`_load_csv_rows(filepath) → list`**
-Reads a single CSV file and returns all rows as a list of lists. Called once at import time for each of the three reference CSVs. If a file is not found it prints a warning and returns an empty list so the app still runs.
+Reads a CSV file once at import time and returns all rows. Missing files print a warning and return empty — the app never crashes due to a missing CSV.
 
 **`_ALL_ROWS`**
-A dict holding all rows from all three CSVs, loaded once at module import. Keys are human-readable labels used in the prompt. This avoids re-reading files from disk on every assessment call.
+Dict holding all rows from all three reference CSVs, loaded once at module import. Never re-read from disk during operation.
 
 **`_get_relevant_context(msg) → str`**
-Given a message, extracts individual words and two-word pairs, then scans all three CSV tables for matching rows. Returns only the matching rows — capped at 5 per table — formatted as pipe-delimited text blocks. If nothing matches it returns a note telling the model to use its tactical judgment. This keeps the prompt small and fast — sending the full 300-row CSV on every call would be wasteful and slow.
+Scans all three CSV tables for rows matching words or two-word pairs from the message. Returns only matching rows, capped at 5 per table. If nothing matches, returns a note telling the model to use tactical judgment. Keeps the prompt lean — only sends relevant reference material.
 
 **`_build_system_prompt(msg) → str`**
-Assembles the complete system prompt for the AI call. Contains the rules, the full approved verb list, the strict JSON output format, and the per-message CSV context from `_get_relevant_context()`. The verb list and rules are the same every call — only the CSV context block at the bottom changes.
+Assembles the complete system prompt: rules, full verb list, strict JSON output format, and the per-message CSV context from `_get_relevant_context()`.
 
 **`get_battle_assessment(msg_content, username, request_id, lm_url, lm_model, timeout, provider, api_key) → list`**
-The main public function. Sends the message to the configured AI provider and returns a fully populated battle JSON list. Internally it builds the payload, adds an `Authorization` header for NanoGPT, sends the request, strips any markdown code fences, extracts the JSON object, validates all three `effectOperator` values against `ALL_VERBS`, and ensures every `opsLimits` entry has `battleEntity` populated (injects `"Unspecified"` if the AI left it blank). Returns an error record if anything fails so the pipeline always continues.
+The main assessment function. Builds the API payload, adds `Authorization` header for NanoGPT, sends the request, parses the response, validates all three `effectOperator` values against `ALL_VERBS`, and ensures every `opsLimits` entry has `battleEntity` populated (injects `"Unspecified"` if missing). Always sets `"originator": "rhino"` regardless of the IRC sender. Returns a full battle JSON list. Falls back to an error record on any failure so the pipeline always continues.
 
 ---
 
 ### `irc/listener.py` — IRC Bot
 
 **`_read_irc_config() → dict`**
-Reads `IRC_SERVER`, `IRC_PORT`, `IRC_CHANNEL`, and `IRC_NICKNAME` directly from `.env` on every call. Used at the top of each reconnect attempt so changes made in the config UI take effect on the next reconnect without restarting the container.
+Reads `IRC_SERVER`, `IRC_PORT`, `IRC_CHANNEL`, and `IRC_NICKNAME` fresh from `.env` on every call. Enables live channel switching from the config UI — changes take effect on the next reconnect.
 
 **`start(server, port, channel, on_message, retry_delay, nickname)`**
-Connects to the IRC server, joins one or more channels (comma-separated), and listens indefinitely. On every `PRIVMSG` line it extracts the username and message text and calls `on_message(username, message)`. Sends `PONG` responses to keep the connection alive. If the connection drops or fails for any reason it waits `retry_delay` seconds and reconnects automatically. IRC settings are re-read from `.env` on every reconnect so a channel change in the UI takes effect on the next reconnect.
+Connects to the IRC server and joins all channels listed in `IRC_CHANNEL` (comma-separated). Calls `on_message(username, message)` for every `PRIVMSG` received. Sends `PONG` to keep the connection alive. Reconnects automatically on any failure, re-reading config from `.env` each time so IRC settings updated in the UI take effect without a restart.
 
 ---
 
 ### `client/pae_sse_client.py` — SSE Listener
 
-Connects to the orchestrator's `/paeinputs-sse` stream in a background daemon thread and listens for `PaeInputCreated` events.
-
 **`PaeSseClient.start(on_event)`**
-Starts the background SSE listener thread. Idempotent — safe to call multiple times. Registers `on_event` as the handler for incoming events.
+Starts the background SSE listener thread. Connects to `ORCHESTRATOR_BASE_URL/paeinputs-sse` and listens for `PaeInputCreated` events.
 
 **`PaeSseClient.stop()`**
-Signals the listener loop to exit on the next iteration. Called on `KeyboardInterrupt` shutdown.
+Signals the listener to exit on next iteration.
 
 **`PaeSseClient._listen_loop()`**
-Runs on the daemon thread. Opens a streaming GET connection to `/paeinputs-sse`. If it disconnects for any reason it waits `SSE_RETRY_DELAY` seconds and reconnects automatically.
+Daemon thread. Opens a streaming GET to the SSE endpoint. Reconnects automatically after `SSE_RETRY_DELAY` seconds on any failure.
 
 **`PaeSseClient._process_stream(resp)`**
-Parses the SSE wire format line by line. Named events arrive as `event: PaeInputCreated` followed by `data: {...}`. Blank lines are message separators. Heartbeat comments (`: heartbeat`) are ignored.
+Parses SSE wire format. Handles `event:`, `data:`, blank line separators, and `: heartbeat` comments.
 
 **`PaeSseClient._dispatch(event_name, raw_data)`**
-Validates the event name, parses the JSON payload, validates it against the `PaeInputCreated` Pydantic schema, and calls the registered handler. Also pushes to a UI queue for monitoring.
+Validates event name, parses JSON, validates against `PaeInputCreated` schema, and calls the registered handler.
 
 ---
 
-### `client/http_client.py` — Shared HTTP Client
+### `client/http_client.py`
 
 **`get_http_client() → httpx.Client`**
-Returns a configured `httpx.Client` pointed at `ORCHESTRATOR_BASE_URL` with the `X-API-Key` header set. Used by both `pae_output_client.py` and `pae_input_client.py` so the orchestrator connection is configured in one place.
+Returns an `httpx.Client` configured with `ORCHESTRATOR_BASE_URL` and the `X-API-Key` header. Used by all orchestrator communication.
 
 ---
 
-### `client/pae_output_client.py` — Orchestrator Output
+### `client/pae_output_client.py`
 
 **`submit(pae: PaeOutput) → PaeOutput`**
-POSTs a completed and schema-validated `PaeOutput` to the orchestrator's `/paeoutputs` endpoint. If the orchestrator returns a 422 (validation error) it prints the full rejection detail so you can see exactly which field failed. Returns the stored record as confirmed by the orchestrator.
+POSTs a validated `PaeOutput` to the orchestrator's `/paeoutputs`. Prints the full 422 rejection body if the orchestrator rejects the payload.
 
 **`get_by_id(pae_id) → PaeOutput | None`**
-Fetches an existing PAE output from the orchestrator by ID. Returns `None` if not found.
+Fetches a PAE output from the orchestrator by ID.
 
 **`update(pae_id, pae) → PaeOutput`**
-Updates an existing PAE output on the orchestrator via PUT.
+Updates an existing PAE output on the orchestrator.
 
 ---
 
-### `pipeline/filter.py` — Noise Filter
-
-**`is_clean(text) → bool`**
-Returns `True` only if the message looks like a real tactical transmission. Strips everything except alphanumeric characters and spaces, then checks that there are at least 2 distinct words and the cleaned text is at least 6 characters long. Filters out single words, IRC bot commands, garbled binary strings, and empty lines. Messages that fail this check are discarded before ever reaching the AI.
-
----
-
-### `pipeline/builder.py` — Request ID Generator
-
-**`make_request_id() → str`**
-Generates a unique `track-XXXXXX` string using `uuid4` for every new IRC message assessment. SSE reassessments use the `requestId` from the SSE payload directly rather than generating a new one.
-
----
-
-### `output/log_writer.py` — Local Log
+### `output/log_writer.py`
 
 **`write(tactical_json, log_path)`**
-Appends the completed battle JSON as a single line to `tactical_output.log` at the project root. Always runs regardless of orchestrator or database availability. Serves as a local backup of every assessment ever made. Each line is a complete self-contained JSON record.
+Appends the full battle JSON as a single line to `tactical_output.log`. Always runs. Local backup of every assessment.
 
 ---
 
-### `output/db_writer.py` — PostgreSQL Writer
-
-Only runs when `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are all set in `.env`. `psycopg2` is imported lazily inside the function so a missing or unreachable database never crashes the app at startup.
+### `output/db_writer.py`
 
 **`insert(tactical_json, db_host, db_name, db_user, db_password, db_port) → bool`**
-Inserts one battle JSON record as a new row in the `pae_data` table. Always an `INSERT` — never an `UPDATE` — so the original record is preserved alongside any reassessments. Stores `request_id`, `originator`, `label`, `description`, the raw message, and the full JSON blob in a `JSONB` column called `payload`. Returns `True` on success, `False` on any failure.
+Inserts one battle JSON record as a new row into the `pae_data` table. `psycopg2` is imported lazily inside the function so a missing or unreachable database never crashes the app. Always an `INSERT` — never an `UPDATE`. Only called when all four DB credentials are present in `.env`.
 
 ---
 
-### `output/gbc_api_client.py` — GBC API Output
-
-Maps PAE battle JSON to the GBC API schema and POSTs it. Only runs when `GBC_API_URL` is set in `.env`.
-
-**`_map_to_gbc_schema(record) → dict`**
-Translates a PAE battle JSON record into the GBC output schema. The mapping is:
-
-| PAE field | GBC field |
-|---|---|
-| `requestId` | `id` |
-| `label` | `label` |
-| `isDone` | `isArchived` / `status` |
-| `description` | `mission` |
-| `lastUpdated` | `lastUpdate` |
-| `chat[0]` | `eventDetails[].information` |
-| `battleEffects` | `targets[]` |
-| `effectOperator` | `targets[].actions[].verb` |
-| `description` | `targets[].actions[].justification` |
-| `timeWindow` | `targets[].actions[].timingInfo` |
-| `opsLimits` presence | `hasOperationalConstraint` |
-| — | `latitude`, `longitude` = `0.0` |
-| — | `eventType`, `alertType` = `0` |
+### `output/gbc_api_client.py`
 
 **`push(tactical_json, api_url, timeout) → bool`**
-Calls `_map_to_gbc_schema()`, prints the payload for debugging, and POSTs it to the GBC API. Returns `True` on success, `False` on timeout, connection error, or HTTP error.
+POSTs the complete battle JSON exactly as produced by the AI to the GBC API endpoint. Nothing is stripped or mapped — the full record is sent. Only called when `GBC_API_URL` is set in `.env`. Returns `True` on success, `False` on any failure.
 
 ---
 
-### `schemas/pae_schemas.py` — Data Contracts
+### `schemas/pae_schemas.py` — Orchestrator Data Contracts
 
-Pydantic models provided by the DB manager that define the exact shape of data exchanged with the orchestrator. All fields use camelCase aliases matching the orchestrator's JSON. Validators coerce bad AI output (empty lists, `None` values) into safe types so validation never crashes the pipeline.
+Pydantic models defining the exact shape of data exchanged with the orchestrator. All fields use camelCase aliases. Validators coerce bad AI output into safe types.
 
-**`OpsLimit`** — one operational constraint: `description`, `battleEntity`, `stateHypothesis`. All optional with coercion.
+**`OpsLimit`** — `description`, `battleEntity`, `stateHypothesis` — all optional with coercion.
 
-**`GoalContribution`** — links an effect to a battle goal: `battleGoal`, `effect`.
+**`GoalContribution`** — `battleGoal`, `effect`.
 
 **`PaeEffect`** — one battle effect slot: `id`, `effectOperator`, `description`, `timeWindow`, `stateHypothesis`, `opsLimits`, `goalContributions`, `recommended`, `ranking`.
 
-**`PaeOutput`** — the full assessment record POSTed to the orchestrator: `id`, `label`, `description`, `requestId`, `gbcId`, `entitiesOfInterest`, `battleEntity`, `battleEffects`, `chat`, `isDone`, `originator`, `lastUpdated`.
+**`PaeOutput`** — the full assessment record: `id`, `label`, `description`, `requestId`, `gbcId`, `entitiesOfInterest`, `battleEntity`, `battleEffects`, `chat`, `isDone`, `originator`, `lastUpdated`.
 
-**`PaeInput`** — the trigger payload received from the orchestrator SSE stream: `gbcId`, `requestId`, `trackId`, `originator`.
+**`PaeInput`** — SSE trigger payload: `gbcId`, `requestId`, `trackId`, `originator`.
 
-**`PaeInputCreated`** — wrapper around `PaeInput` matching the orchestrator's SSE envelope: `{ "paeInput": { ... } }`.
+**`PaeInputCreated`** — SSE envelope: `{ "paeInput": { ... } }`.
 
 ---
 
 ### `config_server.py` — Web UI Server
 
-A FastAPI application running on port 8080. Serves two browser pages and several API endpoints.
+FastAPI app on port 8080 serving the config editor and live dashboard.
 
 **`read_env() → dict`**
-Reads and parses the `.env` file, returning all key-value pairs. Used by the `/env` endpoint to populate the config form fields.
+Parses `.env` and returns all key-value pairs.
 
 **`write_env(updates)`**
-Writes updated values back to `.env` in place. Preserves all existing lines, comments, and ordering. Only modifies the keys provided in `updates`. Appends new keys if they don't already exist in the file.
+Writes updated values to `.env` in place, preserving comments and ordering.
 
 **`detect_provider(url) → str`**
-Same logic as `pae_config._detect_provider()` — checks if the URL contains `nano-gpt.com`. Used to show which AI provider is active in the status panel.
+Detects `"nanogpt"` or `"lmstudio"` from the URL.
 
-**`GET /`**
-Serves the config editor page. Shows a status panel (orchestrator, AI provider, IRC, database), editable fields for all configurable settings, and a Save/Reset button pair. Fields highlighted orange when modified. The AI Endpoint field shows a live hint indicating whether LM Studio or NanoGPT was detected.
+**`GET /`** — Config editor. Status panel, all editable fields, Save/Reset buttons. AI Endpoint field shows a live hint for the detected provider.
 
-**`GET /dashboard`**
-Serves the live assessment dashboard. Shows a live feed of the last 3 assessments (auto-expanded) and a full scrollable history. Each card shows the original message, AI label, description, all three battle effects with verbs/justifications/time windows, entities of interest, and ops limits. Connects to the server via SSE for real-time updates.
+**`GET /dashboard`** — Live assessment dashboard. Live feed (last 3 auto-expanded) and full scrollable history. Full battle JSON per card including verbs, justifications, time windows, entities, and ops limits.
 
-**`GET /env`**
-Returns current `.env` values for all editable fields as JSON. Used by the config page to populate form inputs on load.
+**`GET /env`** — Returns current `.env` values for all editable fields.
 
-**`POST /env`**
-Accepts a JSON body of `{ "values": { "KEY": "value" } }` and writes the changes to `.env`. Only keys defined in `EDITABLE_FIELDS` are accepted — all others are ignored for safety.
+**`POST /env`** — Writes field updates to `.env`. Only accepts keys defined in `EDITABLE_FIELDS`.
 
-**`GET /status`**
-Returns current runtime config for the status panel: orchestrator URL, AI provider and model, IRC server and channel, database connection status.
+**`GET /status`** — Returns orchestrator URL, AI provider/model, IRC server/channel, database status.
 
-**`POST /assessment`**
-Receives completed battle JSON from `main.py` after every assessment. Stores it in an in-memory deque (max 200 records) and broadcasts it to all connected dashboard clients via SSE.
+**`POST /assessment`** — Receives completed battle JSON from `main.py`. Stores in memory (max 200) and broadcasts to all connected dashboard clients.
 
-**`GET /assessments`**
-Returns the full in-memory assessment history as a JSON array. Called by the dashboard on page load to populate the history section.
+**`GET /assessments`** — Returns full in-memory assessment history as a JSON array.
 
-**`GET /assessments/sse`**
-SSE stream endpoint. Dashboard clients connect here and receive a push notification for every new assessment as it arrives. Sends a heartbeat comment every 15 seconds to keep the connection alive.
+**`GET /json`** — Serves the raw JSON viewer page. Same SSE stream as the dashboard — every new assessment appears instantly.
+
+**`GET /assessments/sse`** — SSE stream for the dashboard and JSON viewer. Pushes each new assessment to connected browsers in real time. Heartbeat every 15 seconds.
+
+**`GET /json`** — Raw JSON viewer page. Shows every assessment as a collapsible, syntax-highlighted JSON record. Includes a Copy button per record and a Copy Latest button in the toolbar.
 
 ---
 
 ### `tests/emulator/pae_combined_emulator.py` — Fake Orchestrator
 
-A FastAPI server that mimics the production orchestrator for local testing. Runs on port 3016.
+**`POST /paeinputs`** — Fires a `PaeInputCreated` SSE event. Use this to test reassessment triggers.
 
-**`POST /paeinputs`** — accepts a trigger payload and broadcasts a `PaeInputCreated` SSE event to all connected listeners. This is how you fire a test reassessment.
+**`GET /paeinputs-sse`** — SSE stream your PAE app connects to.
 
-**`GET /paeinputs-sse`** — the SSE stream your PAE app connects to. Emits `PaeInputCreated` events when `/paeinputs` is called.
+**`POST /paeoutputs`** — Receives completed assessments from your PAE app.
 
-**`POST /paeoutputs`** — receives completed assessments from your PAE app and stores them in memory.
+**`GET /paeoutputs`** — Returns all stored assessments. Verify your app submitted correctly here.
 
-**`GET /paeoutputs`** — returns all stored assessments. Check here after a test to confirm your app submitted correctly.
-
-**`GET /docs`** — Swagger UI for clicking through all endpoints manually.
+**`GET /docs`** — Swagger UI for manual endpoint testing.
 
 ---
 
@@ -373,6 +336,12 @@ IRC_PORT=6667
 IRC_CHANNEL=#app_dev,#ops
 IRC_NICKNAME=PAE_Bot
 
+# Triage — fast AI pre-filter before full assessment
+# Leave TRIAGE_ENDPOINT blank to use the same endpoint as AI_ENDPOINT
+TRIAGE_ENDPOINT=
+TRIAGE_MODEL=gpt-4o-mini
+TRIAGE_TIMEOUT=10
+
 # AI — paste LM Studio or NanoGPT URL, provider auto-detected
 AI_ENDPOINT=https://nano-gpt.com/api/v1/chat/completions
 AI_MODEL=gpt-4o-mini
@@ -380,7 +349,7 @@ AI_API_KEY=sk-nano-your-key-here
 AI_TIMEOUT=60
 
 # Orchestrator
-ORCHESTRATOR_BASE_URL=http://10.5.185.XX:PORT
+ORCHESTRATOR_BASE_URL=http://10.5.185.29:3016
 ORCHESTRATOR_API_KEY=your-api-key
 
 # GBC API
@@ -414,7 +383,7 @@ docker-compose up --build
 | `pae` | `pae_app` | — | Main PAE application |
 | `config` | `pae_config` | `8080` | Config editor + live dashboard |
 
-**Docker note:** when running in Docker, LM Studio runs on your host machine. Use `host.docker.internal`:
+**Docker note:** when running in Docker use `host.docker.internal` for LM Studio:
 ```env
 AI_ENDPOINT=http://host.docker.internal:4334/v1/chat/completions
 ```
@@ -423,18 +392,28 @@ AI_ENDPOINT=http://host.docker.internal:4334/v1/chat/completions
 
 ## Web UI — `http://localhost:8080`
 
-**Config page (`/`)** — edit all settings live. Changes write to `.env` immediately and take effect on the next message. No restart needed for AI provider, orchestrator URL, or IRC channel changes.
+**Config (`/`)** — edit all settings live. Changes write to `.env` immediately. No restart needed for AI provider, triage model, orchestrator URL, or IRC channel changes.
 
-**Dashboard (`/dashboard`)** — real-time view of every assessment. Live feed shows the last 3 auto-expanded. History shows everything since the server started.
+**Dashboard (`/dashboard`)** — real-time view of every assessment. Live feed shows last 3 auto-expanded. History shows everything since the server started.
+
+**JSON Viewer (`/json`)** — displays the full raw battle JSON for every assessment with syntax highlighting. Keys in cyan, strings in green, numbers in orange, booleans in purple. Each record is collapsible. Copy button per record copies that JSON to clipboard. Copy Latest grabs the most recent. Receives new assessments live via SSE.
+
+Terminal status values:
+- `TRIAGING...` — triage AI call in progress
+- `FILTERED — NOT TACTICAL` — triage rejected the message
+- `THINKING...` — triage passed, full assessment running
+- `COMPLETED — <label>` — assessment finished and submitted
+
+All completed assessments are visible immediately in the JSON tab at `http://localhost:8080/json`.
 
 ---
 
 ## Connecting to Production
 
-To switch from the emulator to the real orchestrator, update two values in `.env` or the config UI:
+Update two values in `.env` or the config UI:
 
 ```env
-ORCHESTRATOR_BASE_URL=http://10.5.185.XX:PORT
+ORCHESTRATOR_BASE_URL=http://10.5.185.29:3016
 ORCHESTRATOR_API_KEY=your-real-api-key
 ```
 
@@ -444,11 +423,11 @@ The SSE client reconnects automatically within `SSE_RETRY_DELAY` seconds.
 
 ## AI Models
 
-| Model | Endpoint value | Notes |
+| Model | Endpoint | Notes |
 |---|---|---|
 | Gemma 4 E4B | `http://host.docker.internal:4334/v1/chat/completions` | Local, fast |
-| Gemma 4 31B | `http://host.docker.internal:4334/v1/chat/completions` + change `AI_MODEL` | Local, more capable |
-| GPT-4o Mini | `https://nano-gpt.com/api/v1/chat/completions` | Cloud, fast, good JSON |
+| Gemma 4 31B | Same + change `AI_MODEL` | Local, more capable |
+| GPT-4o Mini | `https://nano-gpt.com/api/v1/chat/completions` | Cloud, fast, ideal for triage |
 | GPT-4o | `https://nano-gpt.com/api/v1/chat/completions` | Cloud, most capable |
 
 Switch providers by changing `AI_ENDPOINT` in the config UI — no restart needed.
@@ -457,16 +436,18 @@ Switch providers by changing `AI_ENDPOINT` in the config UI — no restart neede
 
 ## Key Behaviour Notes
 
-- Messages under 2 words or 6 characters are filtered as noise before reaching the AI
-- The AI must choose verbs exclusively from the approved battle dictionary (153 verbs across 4 categories)
-- CSV reference tables are looked up per-message — only rows matching words in the message are sent to the AI (max 5 rows per table) to keep the prompt lean
-- If the AI returns nothing the record is marked `NO PAE ACTION REQUIRED`
-- If the AI omits `battleEntity` from `opsLimits`, the value `"Unspecified"` is injected automatically before submission
-- All assessments are written to `tactical_output.log` locally regardless of orchestrator or database availability
-- The dashboard stores up to 200 assessments in memory — history resets if the config container restarts
-- The IRC bot reconnects automatically if the server drops, and re-reads channel/nickname settings from `.env` on each reconnect
-- DB writes are skipped entirely if `DB_HOST` is not set — no errors, no crashes
-- GBC API pushes are skipped entirely if `GBC_API_URL` is not set
+- All messages pass through AI triage before reaching full assessment — casual chat, IRC noise, and off-topic messages are discarded
+- Triage is fail-open — any error (timeout, connection failure) treats the message as relevant so nothing is silently lost
+- The full AI assessment must choose verbs exclusively from the approved battle dictionary (153 verbs across 4 categories: ATTACK, INVESTIGATE, DEGRADE, RESCUE)
+- CSV reference tables are looked up per-message — only rows matching words in the message are sent (max 5 per table) to keep the prompt lean
+- `originator` is always set to `"rhino"` regardless of who sent the IRC message
+- If the AI omits `battleEntity` from `opsLimits`, `"Unspecified"` is injected automatically before submission
+- All assessments are written to `tactical_output.log` locally regardless of any other output status
+- DB writes are skipped if `DB_HOST` is not set — no errors
+- GBC API pushes are skipped if `GBC_API_URL` is not set — no errors
+- The IRC bot reconnects automatically and re-reads channel settings from `.env` on each reconnect
+- The dashboard stores up to 200 assessments in memory — resets if the config container restarts
+- Multiple IRC channels are supported — comma-separate them in `IRC_CHANNEL`
 
 ```
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀

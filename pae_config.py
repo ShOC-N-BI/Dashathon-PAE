@@ -22,7 +22,15 @@ IRC_NICKNAME = os.getenv("IRC_NICKNAME", "")  # leave blank for random name
 AI_ENDPOINT = os.getenv("AI_ENDPOINT", "http://10.5.185.55:4334/v1/chat/completions")
 AI_MODEL    = os.getenv("AI_MODEL",    "google/gemma-4-e4b")
 AI_API_KEY  = os.getenv("AI_API_KEY",  "")
-AI_TIMEOUT  = int(os.getenv("AI_TIMEOUT", "60"))
+AI_TIMEOUT  = int(os.getenv("AI_TIMEOUT", "60") or "60")
+
+# ---------------------------------------------------------------------------
+# Triage — fast pre-filter AI call before full assessment
+# Can use the same endpoint as AI_ENDPOINT or a separate faster model
+# ---------------------------------------------------------------------------
+TRIAGE_ENDPOINT = os.getenv("TRIAGE_ENDPOINT", "")  # falls back to AI_ENDPOINT if blank
+TRIAGE_MODEL    = os.getenv("TRIAGE_MODEL",    "gpt-4o-mini")
+TRIAGE_TIMEOUT  = int(os.getenv("TRIAGE_TIMEOUT", "10") or "10")
 
 # ---------------------------------------------------------------------------
 # Orchestrator — central hub for the app cluster
@@ -85,12 +93,21 @@ def get_ai_config() -> dict:
     timeout  = int(_get("AI_TIMEOUT", str(AI_TIMEOUT)))
     provider = _detect_provider(endpoint)
 
+    # Triage config — fall back to main AI endpoint if TRIAGE_ENDPOINT not set
+    triage_url     = _get("TRIAGE_ENDPOINT", TRIAGE_ENDPOINT) or endpoint
+    triage_model   = _get("TRIAGE_MODEL",    TRIAGE_MODEL)
+    triage_timeout = int(_get("TRIAGE_TIMEOUT", str(TRIAGE_TIMEOUT)))
+
     print(f"CONFIG: provider={provider.upper()}  endpoint={endpoint}  model={model}  key_set={bool(api_key)}")
+    print(f"CONFIG: triage_url={triage_url}  triage_model={triage_model}")
 
     return {
-        "provider": provider,
-        "url":      endpoint,
-        "model":    model,
-        "api_key":  api_key,
-        "timeout":  timeout,
+        "provider":       provider,
+        "url":            endpoint,
+        "model":          model,
+        "api_key":        api_key,
+        "timeout":        timeout,
+        "triage_url":     triage_url,
+        "triage_model":   triage_model,
+        "triage_timeout": triage_timeout,
     }
