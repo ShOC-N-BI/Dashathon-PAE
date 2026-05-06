@@ -1,0 +1,12 @@
+services:
+  mash-proxy:
+    build: .
+    container_name: mash-proxy
+    restart: unless-stopped
+    environment:
+      MASH_HOST: ${MASH_HOST:-10.5.185.29}
+      MASH_UI_PORT: ${MASH_UI_PORT:-3011}
+      MASH_UI_UPSTREAM_HOST: ${MASH_UI_UPSTREAM_HOST:-10.5.185.29}
+      MASH_UI_UPSTREAM_PORT: ${MASH_UI_UPSTREAM_PORT:-3011}
+    ports:
+      - "${MASH_UI_PORT:-3011}:80"
