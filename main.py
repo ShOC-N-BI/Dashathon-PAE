@@ -10,6 +10,7 @@ from irc.listener import start as irc_start
 from output import log_writer, db_writer, gbc_api_client
 from pipeline.builder import make_request_id
 from pipeline.triage import is_relevant
+from pipeline.enricher import classify, extract_context
 from schemas.pae_schemas import PaeInputCreated, PaeOutput
 
 from datetime import datetime
@@ -70,6 +71,7 @@ def run_pipeline(
     source:     str,
     request_id: str,
     gbc_id:     str | None = None,
+    channel:    str | None = None,
 ) -> None:
     """
     Run the full PAE pipeline for one message:
@@ -103,7 +105,26 @@ def run_pipeline(
     live.update(make_dashboard(message, username, None, "THINKING...", source))
     print(f"USING PROVIDER: {ai['provider'].upper()}  MODEL: {ai['model']}  URL: {ai['url']}  KEY_SET: {bool(ai['api_key'])}")
 
-    # -- Step 3: Full AI assessment
+    # -- Step 3: Enrich message with classify API (callsigns + entities)
+    enriched = {}  # always defined — populated only if CLASSIFY_API_URL is set
+    if config.CLASSIFY_API_URL:
+        classification = classify(
+            message=message,
+            channel=channel if channel else config.IRC_CHANNEL.split(",")[0].strip(),
+            sender=username,
+            timestamp=__import__("datetime").datetime.utcnow().strftime("%H:%M:%S"),
+            api_url=config.CLASSIFY_API_URL,
+            timeout=config.CLASSIFY_TIMEOUT,
+        )
+        enriched = extract_context(classification)
+        print(f"ENRICH: callsigns={enriched['callsigns']}  entities={enriched['entities']}")
+        # Forward classify response to config server dashboard
+        try:
+            requests.post("http://config:8080/classify-log", json=classification, timeout=2)
+        except Exception:
+            pass
+
+    # -- Step 4: Full AI assessment
     tactical_json = get_battle_assessment(
         msg_content=message,
         username=username,
@@ -113,6 +134,7 @@ def run_pipeline(
         timeout=ai["timeout"],
         provider=ai["provider"],
         api_key=ai["api_key"],
+        enriched=enriched,
     )
 
     # -- Step 2: Write to local log (always, regardless of orchestrator availability)
@@ -178,6 +200,7 @@ def on_irc_message(live: Live, username: str, message: str) -> None:
         source="IRC",
         request_id=make_request_id(),
         gbc_id=None,
+        channel=config.IRC_CHANNEL.split(",")[0].strip(),
     )
 
 

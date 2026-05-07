@@ -25,6 +25,13 @@ AI_API_KEY  = os.getenv("AI_API_KEY",  "")
 AI_TIMEOUT  = int(os.getenv("AI_TIMEOUT", "60") or "60")
 
 # ---------------------------------------------------------------------------
+# Classify API — enriches messages with callsigns and entities before assessment
+# ---------------------------------------------------------------------------
+CLASSIFY_API_URL     = os.getenv("CLASSIFY_API_URL", "")  # e.g. http://10.5.185.30:3060/classify
+CLASSIFY_TIMEOUT     = int(os.getenv("CLASSIFY_TIMEOUT", "5") or "5")
+IRC_CHANNEL_DEFAULT  = os.getenv("IRC_CHANNEL", "#app_dev").split(",")[0].strip()
+
+# ---------------------------------------------------------------------------
 # Triage — fast pre-filter AI call before full assessment
 # Can use the same endpoint as AI_ENDPOINT or a separate faster model
 # ---------------------------------------------------------------------------

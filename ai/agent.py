@@ -101,9 +101,30 @@ def _get_relevant_context(msg: str) -> str:
 # SYSTEM PROMPT
 # ---------------------------------------------------------------------------
 
-def _build_system_prompt(msg: str) -> str:
+def _build_system_prompt(msg: str, enriched: dict = None) -> str:
     verb_list = ", ".join(ALL_VERBS)
     context   = _get_relevant_context(msg)
+
+    # Build enriched context block if classification data was provided
+    enriched_block = ""
+    if enriched:
+        callsigns = enriched.get("callsigns", [])
+        entities  = enriched.get("entities", [])
+        tier      = enriched.get("importance_tier", "")
+        score     = enriched.get("importance_score", 0)
+        reasoning = enriched.get("reasoning", "")
+
+        lines = ["PRE-CLASSIFIED CONTEXT (extracted by message classifier):"]
+        if callsigns:
+            lines.append(f"Callsigns identified: {', '.join(callsigns)}")
+        if entities:
+            lines.append(f"Entities of interest: {', '.join(entities)}")
+        if tier:
+            lines.append(f"Importance: {tier} (score {score})")
+        if reasoning:
+            lines.append(f"Classifier reasoning: {reasoning}")
+        lines.append("Use this context to populate entitiesOfInterest and battleEntity accurately.")
+        enriched_block = "\n".join(lines) + "\n"
 
     return f"""You are a tactical AI analyst embedded in a real-time battlefield communications pipeline.
 
@@ -184,7 +205,8 @@ OUTPUT FORMAT (strict JSON, nothing else):
 
 REFERENCE TABLES (terms relevant to this message only):
 {context}
-"""
+
+{enriched_block}"""
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +222,7 @@ def get_battle_assessment(
     timeout: int = 20,
     provider: str = "lmstudio",
     api_key: str = "",
+    enriched: dict = None,
 ) -> list:
     """
     Send a tactical message to the configured AI provider and return a fully
@@ -218,7 +241,7 @@ def get_battle_assessment(
     payload = {
         "model": lm_model,
         "messages": [
-            {"role": "system", "content": _build_system_prompt(msg_content)},
+            {"role": "system", "content": _build_system_prompt(msg_content, enriched)},
             {"role": "user",   "content": f"TACTICAL MESSAGE: {msg_content}"},
         ],
         "temperature": 0,
@@ -230,14 +253,26 @@ def get_battle_assessment(
 
     def _envelope(ai_fields: dict) -> list:
         """Wrap AI-generated fields in the full battle JSON envelope."""
+        # Merge classifier entities with AI-identified ones (deduplicated)
+        ai_entities = ai_fields.get("entitiesOfInterest", [])
+        ai_battle   = ai_fields.get("battleEntity", [])
+        if enriched:
+            extra_entities = enriched.get("entities", [])
+            extra_callsigns = enriched.get("callsigns", [])
+            merged_entities = list(dict.fromkeys(ai_entities + extra_entities))
+            merged_battle   = list(dict.fromkeys(ai_battle + extra_callsigns))
+        else:
+            merged_entities = ai_entities
+            merged_battle   = ai_battle
+
         return [{
             "id": str(uuid.uuid4()),
             "requestId": request_id,
             "label": ai_fields.get("label", "Tactical Update"),
             "description": ai_fields.get("description", ""),
             "gbcId": None,
-            "entitiesOfInterest": ai_fields.get("entitiesOfInterest", []),
-            "battleEntity": ai_fields.get("battleEntity", []),
+            "entitiesOfInterest": merged_entities,
+            "battleEntity": merged_battle,
             "battleEffects": ai_fields.get("battleEffects", []),
             "chat": [
                 msg_content,

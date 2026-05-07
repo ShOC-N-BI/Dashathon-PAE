@@ -37,6 +37,25 @@ app = FastAPI(title="PAE Config Server", version="1.0.0")
 _assessments: deque = deque(maxlen=200)
 _sse_subscribers: list[asyncio.Queue] = []
 
+# ---------------------------------------------------------------------------
+# CLASSIFY STORE
+# ---------------------------------------------------------------------------
+
+_classify_logs: deque = deque(maxlen=500)
+_classify_subscribers: list[asyncio.Queue] = []
+
+
+def _broadcast_classify(record: dict) -> None:
+    payload = f"data: {json.dumps(record)}\n\n"
+    dead = []
+    for q in _classify_subscribers:
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        _classify_subscribers.remove(q)
+
 
 def _broadcast(record: dict) -> None:
     payload = f"data: {json.dumps(record)}\n\n"
@@ -74,6 +93,18 @@ EDITABLE_FIELDS = {
         "description": "X-API-Key sent with every orchestrator request",
         "placeholder": "your-api-key-here",
         "type":        "password",
+    },
+    "CLASSIFY_API_URL": {
+        "label":       "Classify API URL",
+        "description": "Message enrichment endpoint — adds callsigns and entities to AI context",
+        "placeholder": "http://10.5.185.30:3060/classify",
+        "type":        "url",
+    },
+    "CLASSIFY_TIMEOUT": {
+        "label":       "Classify Timeout (seconds)",
+        "description": "Max time to wait for classify response — keep short (3-5s)",
+        "placeholder": "5",
+        "type":        "number",
     },
     "TRIAGE_ENDPOINT": {
         "label":       "Triage Endpoint URL",
@@ -283,6 +314,47 @@ def get_assessments():
     return JSONResponse(content=list(_assessments))
 
 
+@app.post("/classify-log")
+async def receive_classify(request: Request):
+    """main.py POSTs each classify API response here for the classify tab."""
+    body = await request.json()
+    body["_receivedAt"] = datetime.utcnow().isoformat() + "Z"
+    _classify_logs.appendleft(body)
+    _broadcast_classify(body)
+    return {"status": "received"}
+
+
+@app.get("/classify-logs")
+def get_classify_logs():
+    return JSONResponse(content=list(_classify_logs))
+
+
+@app.get("/classify-logs/sse")
+async def classify_sse(request: Request):
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _classify_subscribers.append(queue)
+
+    async def generator():
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield msg
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                if await request.is_disconnected():
+                    break
+        finally:
+            if queue in _classify_subscribers:
+                _classify_subscribers.remove(queue)
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/assessments/sse")
 async def assessments_sse(request: Request):
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -325,6 +397,11 @@ def serve_dashboard():
 @app.get("/json", response_class=HTMLResponse)
 def serve_json_viewer():
     return HTMLResponse(content=JSON_VIEWER_HTML)
+
+
+@app.get("/classify", response_class=HTMLResponse)
+def serve_classify_tab():
+    return HTMLResponse(content=CLASSIFY_TAB_HTML)
 
 # ---------------------------------------------------------------------------
 # CONFIG UI HTML
@@ -403,6 +480,7 @@ CONFIG_HTML = """<!DOCTYPE html>
     <a href="/" class="active">Config</a>
     <a href="/dashboard">Dashboard</a>
     <a href="/json">JSON</a>
+    <a href="/classify">Classify</a>
   </nav>
 </header>
 <main>
@@ -628,6 +706,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <a href="/">Config</a>
     <a href="/dashboard" class="active">Dashboard</a>
     <a href="/json">JSON</a>
+    <a href="/classify">Classify</a>
   </nav>
   <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
 </header>
@@ -859,6 +938,7 @@ JSON_VIEWER_HTML = r"""<!DOCTYPE html>
     <a href="/">Config</a>
     <a href="/dashboard">Dashboard</a>
     <a href="/json" class="active">JSON</a>
+    <a href="/classify">Classify</a>
   </nav>
   <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
 </header>
@@ -1003,6 +1083,291 @@ JSON_VIEWER_HTML = r"""<!DOCTYPE html>
     es.onmessage = (e) => {
       if (!e.data || e.data.trim() === '') return;
       try { addRecord(JSON.parse(e.data), true); } catch(err) {}
+    };
+    es.onerror = () => {
+      statusEl.textContent = 'RECONNECTING...';
+      statusEl.style.color = 'var(--accent2)';
+      es.close();
+      setTimeout(connectSSE, 3000);
+    };
+  }
+
+  loadHistory();
+  connectSSE();
+</script>
+</body>
+</html>"""
+
+# ---------------------------------------------------------------------------
+# CLASSIFY TAB HTML
+# ---------------------------------------------------------------------------
+
+CLASSIFY_TAB_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAE Classify</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+    :root{
+      --bg:#060a0f;--surface:#0b1219;--surface2:#0f1a24;--border:#162030;
+      --accent:#00e5ff;--accent2:#ff6b35;--accent3:#7fff6b;--accent4:#a855f7;
+      --text:#b8ccd8;--muted:#3a5060;--mono:'Share Tech Mono',monospace;
+      --sans:'Rajdhani',sans-serif;
+      --high:#ff4466;--med:#ffaa00;--low:#4a6080;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;}
+    body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,.008) 3px,rgba(0,229,255,.008) 4px);pointer-events:none;z-index:1000;}
+    header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+    .logo{display:flex;align-items:center;gap:12px;}
+    .logo-badge{width:34px;height:34px;border:2px solid var(--accent4);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--accent4);}
+    .logo-text{font-size:14px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--accent4);}
+    .logo-sub{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;}
+    nav{display:flex;gap:4px;}
+    nav a{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:8px 16px;border:1px solid transparent;transition:.2s;}
+    nav a:hover{color:var(--accent);border-color:var(--border);}
+    nav a.active{color:var(--accent4);border-color:var(--accent4);background:rgba(168,85,247,.05);}
+    .live-badge{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--accent3);}
+    .dot{width:6px;height:6px;border-radius:50%;background:var(--accent3);animation:blink 1.2s infinite;}
+    @keyframes blink{0%,100%{opacity:1;}50%{opacity:.2;}}
+
+    main{max-width:1200px;margin:0 auto;padding:32px;}
+
+    .toolbar{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+    .section-label{font-family:var(--mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:12px;flex:1;}
+    .section-label::after{content:'';flex:1;height:1px;background:var(--border);}
+    .btn{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:8px 18px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:.2s;}
+    .btn:hover{border-color:var(--accent);color:var(--accent);}
+    .btn-clear{border-color:var(--accent2);color:var(--accent2);}
+    .btn-clear:hover{background:rgba(255,107,53,.08);}
+
+    .feed{display:flex;flex-direction:column;gap:10px;}
+
+    .card{background:var(--surface);border:1px solid var(--border);overflow:hidden;animation:slideIn .25s ease;}
+    .card.new{animation:flashIn .4s ease;}
+    @keyframes slideIn{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:none;}}
+    @keyframes flashIn{0%{background:rgba(168,85,247,.08);}100%{background:var(--surface);}}
+
+    .card-header{padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;flex-wrap:wrap;}
+    .card-header:hover{background:rgba(255,255,255,.02);}
+
+    /* Tier badge */
+    .tier{font-family:var(--mono);font-size:10px;letter-spacing:1px;padding:3px 10px;border:1px solid;text-transform:uppercase;flex-shrink:0;}
+    .tier.HIGH_VALUE{border-color:var(--high);color:var(--high);background:rgba(255,68,102,.06);}
+    .tier.MEDIUM_VALUE{border-color:var(--med);color:var(--med);background:rgba(255,170,0,.06);}
+    .tier.LOW_VALUE{border-color:var(--low);color:var(--low);}
+
+    .card-msg{font-family:var(--mono);font-size:12px;color:var(--text);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .card-sender{font-family:var(--mono);font-size:11px;color:var(--accent4);flex-shrink:0;}
+    .card-channel{font-family:var(--mono);font-size:10px;color:var(--muted);flex-shrink:0;}
+    .card-time{font-family:var(--mono);font-size:10px;color:var(--muted);flex-shrink:0;}
+    .card-score{font-family:var(--mono);font-size:10px;color:var(--muted);flex-shrink:0;}
+    .toggle{font-family:var(--mono);font-size:10px;color:var(--accent4);flex-shrink:0;}
+
+    .card-body{display:none;border-top:1px solid var(--border);padding:16px;}
+    .card-body.open{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+
+    .section{background:var(--surface2);padding:12px 14px;}
+    .section-head{font-family:var(--mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+    .section.full{grid-column:1/-1;}
+
+    .tag-row{display:flex;flex-wrap:wrap;gap:6px;}
+    .tag{font-family:var(--mono);font-size:10px;padding:3px 10px;border:1px solid var(--border);color:var(--text);letter-spacing:.5px;}
+    .tag.callsign{border-color:rgba(168,85,247,.4);color:var(--accent4);}
+    .tag.entity{border-color:rgba(0,229,255,.3);color:var(--accent);}
+    .tag.bin{border-color:rgba(127,255,107,.25);color:var(--accent3);}
+
+    .meta-row{display:flex;justify-content:space-between;margin-bottom:6px;}
+    .meta-key{font-family:var(--mono);font-size:10px;color:var(--muted);}
+    .meta-val{font-family:var(--mono);font-size:10px;color:var(--text);}
+
+    .reasoning-text{font-family:var(--mono);font-size:11px;color:var(--text);line-height:1.6;}
+
+    .confidence-bar-wrap{height:4px;background:var(--border);margin-top:8px;border-radius:2px;}
+    .confidence-bar{height:4px;border-radius:2px;background:var(--accent4);transition:width .4s;}
+
+    .empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:48px;text-align:center;border:1px dashed var(--border);}
+
+    .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;font-family:var(--mono);font-size:11px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent4);color:var(--accent4);transform:translateY(20px);opacity:0;transition:.3s;z-index:999;}
+    .toast.show{transform:translateY(0);opacity:1;}
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-badge">CLS</div>
+    <div><div class="logo-text">Classify Feed</div><div class="logo-sub">Pre-emptive Action Engine</div></div>
+  </div>
+  <nav>
+    <a href="/">Config</a>
+    <a href="/dashboard">Dashboard</a>
+    <a href="/json">JSON</a>
+    <a href="/classify" class="active">Classify</a>
+  </nav>
+  <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
+</header>
+
+<main>
+  <div class="toolbar">
+    <div class="section-label">Classify API Feed</div>
+    <button class="btn btn-clear" onclick="clearAll()">Clear</button>
+  </div>
+  <div class="feed" id="feed">
+    <div class="empty" id="empty-msg">Waiting for classify responses...</div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const feedEl   = document.getElementById('feed');
+  const emptyEl  = document.getElementById('empty-msg');
+  const statusEl = document.getElementById('live-status');
+
+  function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function timeStr(iso){ if(!iso)return ''; return new Date(iso).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+
+  function tierClass(tier){
+    if(!tier) return 'LOW_VALUE';
+    if(tier.includes('HIGH')) return 'HIGH_VALUE';
+    if(tier.includes('MED'))  return 'MEDIUM_VALUE';
+    return 'LOW_VALUE';
+  }
+
+  function buildCard(r, isNew){
+    const card = document.createElement('div');
+    card.className = 'card' + (isNew ? ' new' : '');
+
+    const tier      = r.importance_tier || 'UNKNOWN';
+    const tc        = tierClass(tier);
+    const msg       = r.raw_content || r.processed_content || '';
+    const sender    = r.sender || '?';
+    const channel   = r.channel || '';
+    const time      = r.timestamp || timeStr(r._receivedAt);
+    const score     = r.importance_score ?? '?';
+    const conf      = r.confidence ?? 0;
+    const confPct   = Math.round(conf * 100);
+    const reasoning = r.reasoning || '';
+
+    // Entities
+    const entRef    = r.entities_referenced || {};
+    const callsigns = entRef.callsigns || [];
+    const tracks    = entRef.track_numbers || [];
+    const coords    = entRef.coordinates || [];
+    const missions  = entRef.mission_numbers || [];
+
+    // Matched bins
+    const mBins  = r.matched_bins || {};
+    const bins   = r.bins || [];
+    const allBinKeys = bins.map(b => b.bin_key);
+
+    // All entity tags
+    const entityTags = [...tracks, ...coords, ...missions];
+
+    // Build callsign tags
+    const csTags = callsigns.map(c =>
+      `<span class="tag callsign">${esc(c)}</span>`
+    ).join('');
+
+    // Build entity tags
+    const entTags = entityTags.map(e =>
+      `<span class="tag entity">${esc(e)}</span>`
+    ).join('');
+
+    // Build bin tags
+    const binTags = allBinKeys.slice(0, 8).map(b =>
+      `<span class="tag bin">${esc(b)}</span>`
+    ).join('');
+
+    card.innerHTML = `
+      <div class="card-header" onclick="toggle(this)">
+        <span class="tier ${tc}">${esc(tier)}</span>
+        <span class="card-msg">${esc(msg)}</span>
+        <span class="card-sender">${esc(sender)}</span>
+        <span class="card-channel">${esc(channel)}</span>
+        <span class="card-time">${esc(time)}</span>
+        <span class="card-score">score ${esc(String(score))}</span>
+        <span class="toggle">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="section">
+          <div class="section-head">Callsigns</div>
+          <div class="tag-row">${csTags || '<span style="color:var(--muted);font-family:var(--mono);font-size:11px;">none identified</span>'}</div>
+        </div>
+        <div class="section">
+          <div class="section-head">Entities</div>
+          <div class="tag-row">${entTags || '<span style="color:var(--muted);font-family:var(--mono);font-size:11px;">none identified</span>'}</div>
+        </div>
+        <div class="section">
+          <div class="section-head">Classification</div>
+          <div class="meta-row"><span class="meta-key">Category</span><span class="meta-val">${esc(r.category||'')}</span></div>
+          <div class="meta-row"><span class="meta-key">Lane</span><span class="meta-val">${esc(r.classification_lane||'')}</span></div>
+          <div class="meta-row"><span class="meta-key">Path</span><span class="meta-val">${esc(r.classification_path||'')}</span></div>
+          <div class="meta-row"><span class="meta-key">Confidence</span><span class="meta-val">${confPct}%</span></div>
+          <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${confPct}%"></div></div>
+        </div>
+        <div class="section">
+          <div class="section-head">Matched Bins</div>
+          <div class="tag-row">${binTags || '<span style="color:var(--muted);font-family:var(--mono);font-size:11px;">none</span>'}</div>
+        </div>
+        <div class="section full">
+          <div class="section-head">Classifier Reasoning</div>
+          <div class="reasoning-text">${esc(reasoning) || '—'}</div>
+        </div>
+      </div>`;
+
+    return card;
+  }
+
+  function toggle(hdr){
+    const body  = hdr.nextElementSibling;
+    const arrow = hdr.querySelector('.toggle');
+    const open  = body.classList.toggle('open');
+    arrow.textContent = open ? '▲' : '▼';
+  }
+
+  function addCard(r, isNew){
+    emptyEl.style.display = 'none';
+    const card = buildCard(r, isNew);
+    if(isNew){
+      // Auto-expand new cards
+      card.querySelector('.card-body').classList.add('open');
+      card.querySelector('.toggle').textContent = '▲';
+    }
+    feedEl.insertBefore(card, feedEl.firstChild);
+  }
+
+  function clearAll(){
+    feedEl.innerHTML = '';
+    feedEl.appendChild(emptyEl);
+    emptyEl.style.display = 'block';
+  }
+
+  async function loadHistory(){
+    try{
+      const res  = await fetch('/classify-logs');
+      const data = await res.json();
+      if(data.length){
+        emptyEl.style.display = 'none';
+        data.forEach(r => addCard(r, false));
+        // Collapse all on history load
+        feedEl.querySelectorAll('.card-body').forEach(b => b.classList.remove('open'));
+        feedEl.querySelectorAll('.toggle').forEach(t => t.textContent = '▼');
+      }
+    }catch(e){}
+  }
+
+  function connectSSE(){
+    const es = new EventSource('/classify-logs/sse');
+    es.onopen = () => {
+      statusEl.textContent = 'LIVE';
+      statusEl.style.color = 'var(--accent3)';
+    };
+    es.onmessage = (e) => {
+      if(!e.data || e.data.trim() === '') return;
+      try{ addCard(JSON.parse(e.data), true); }catch(err){}
     };
     es.onerror = () => {
       statusEl.textContent = 'RECONNECTING...';
