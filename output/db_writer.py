@@ -10,13 +10,8 @@ def insert(
     db_port: int = 5432,
 ) -> bool:
     """
-    Insert a completed battle JSON record as a new row in the pae_data table.
-
-    psycopg2 is imported inside the function so a missing or unconfigured DB
-    never crashes the app on startup. This function is only called when DB
-    credentials are present in .env.
-
-    Returns True on success, False on any failure.
+    Insert a completed battle JSON record into the pae_data table.
+    Only inserts columns known to exist: message, originator, label, description, payload.
     """
     try:
         import psycopg2
@@ -28,43 +23,38 @@ def insert(
     record = tactical_json[0]
     chat   = record.get("chat", [])
 
+    sql = """
+        INSERT INTO pae_data (originator, label, description, payload, message)
+        VALUES (%(originator)s, %(label)s, %(description)s, %(payload)s, %(message)s)
+    """
+
     row = {
-        "request_id":  record.get("requestId"),
-        "originator":  record.get("originator"),
-        "label":       record.get("label"),
-        "description": record.get("description"),
+        "originator":  record.get("originator", "rhino"),
+        "label":       record.get("label", ""),
+        "description": record.get("description", ""),
         "payload":     Json(record),
         "message":     chat[0] if chat else None,
     }
 
-    sql = """
-        INSERT INTO pae_data
-            (request_id, originator, label, description, payload, message)
-        VALUES
-            (%(request_id)s, %(originator)s, %(label)s, %(description)s, %(payload)s, %(message)s)
-    """
-
     conn = None
     try:
         conn = psycopg2.connect(
-            host=db_host,
-            dbname=db_name,
-            user=db_user,
-            password=db_password,
-            port=db_port,
+            host=db_host, dbname=db_name, user=db_user,
+            password=db_password, port=db_port,
         )
         with conn:
             with conn.cursor() as cur:
                 cur.execute(sql, row)
-        print(f"DB insert OK — requestId: {row['request_id']}  label: {row['label']}")
+        print(f"DB insert OK — label: {row['label']}")
         return True
-
     except psycopg2.OperationalError as e:
         print(f"WARNING: DB connection failed: {e}")
     except psycopg2.Error as e:
         print(f"WARNING: DB insert failed: {e}")
     finally:
         if conn:
-            conn.close()
-
+            try:
+                conn.close()
+            except Exception:
+                pass
     return False

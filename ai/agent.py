@@ -82,7 +82,7 @@ def _get_relevant_context(msg: str) -> str:
     terms = set(words)
     terms.update(f"{words[i]} {words[i+1]}" for i in range(len(words) - 1))
 
-    MAX_ROWS_PER_TABLE = 5  # cap to keep prompt fast
+    MAX_ROWS_PER_TABLE = 5
     sections = []
     for label, rows in _ALL_ROWS.items():
         if not rows:
@@ -98,7 +98,7 @@ def _get_relevant_context(msg: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# SYSTEM PROMPT
+# SYSTEM PROMPT  — original, unchanged
 # ---------------------------------------------------------------------------
 
 def _build_messages(msg: str, enriched: dict = None) -> tuple[str, str]:
@@ -108,6 +108,7 @@ def _build_messages(msg: str, enriched: dict = None) -> tuple[str, str]:
     """
     context = _get_relevant_context(msg)
 
+<<<<<<< Updated upstream
     # Build enriched block
     enriched_block = ""
     if enriched:
@@ -124,6 +125,25 @@ def _build_messages(msg: str, enriched: dict = None) -> tuple[str, str]:
         "Read the MESSAGE and return ONLY a valid JSON object. "
         "No markdown, no explanation, no extra text."
     )
+=======
+    enriched_block = ""
+    if enriched:
+        callsigns     = enriched.get("callsigns", [])
+        track_numbers = enriched.get("track_numbers", [])
+        entities      = enriched.get("entities", [])
+        tier          = enriched.get("importance_tier", "")
+        score         = enriched.get("importance_score", 0)
+        reasoning     = enriched.get("reasoning", "")
+
+        lines = ["PRE-CLASSIFIED CONTEXT (extracted by message classifier):"]
+        if callsigns:     lines.append(f"Callsigns identified: {', '.join(callsigns)}")
+        if track_numbers: lines.append(f"Track numbers / JTN IDs: {', '.join(track_numbers)}")
+        if entities:      lines.append(f"Entities of interest: {', '.join(entities)}")
+        if tier:          lines.append(f"Importance: {tier} (score {score})")
+        if reasoning:     lines.append(f"Classifier reasoning: {reasoning}")
+        lines.append("Use this context to populate entitiesOfInterest and battleEntity accurately.")
+        enriched_block = "\n".join(lines) + "\n"
+>>>>>>> Stashed changes
 
     ref_block = ("REF: " + context + "\n") if context.strip() and "No matching" not in context else ""
 
@@ -137,7 +157,72 @@ def _build_messages(msg: str, enriched: dict = None) -> tuple[str, str]:
 Rules: entitiesOfInterest and battleEntity must be the same list. opsLimits battleEntity must not be null.
 {enriched_block}{ref_block}MESSAGE: {msg}"""
 
+<<<<<<< Updated upstream
     return system_msg, user_msg
+=======
+APPROVED VERB LIST:
+{verb_list}
+
+OUTPUT FORMAT (strict JSON, nothing else):
+{{
+  "label": "<short tactical title>",
+  "description": "<brief strategic summary of message intent>",
+  "entitiesOfInterest": ["<key term or location>"],
+  "battleEntity": ["<vehicle or actor type>"],
+  "battleEffects": [
+    {{
+      "id": "pae-002-e01",
+      "effectOperator": "<VERB from approved list>",
+      "description": "<justification for this action>",
+      "timeWindow": "<urgency estimate>",
+      "stateHypothesis": "<tactical outcome if enacted>",
+      "opsLimits": [{{
+        "description": "<operational constraint>",
+        "battleEntity": "<vehicle required for this effect>",
+        "stateHypothesis": "<variables or risks>"
+      }}],
+      "goalContributions": [{{"battleGoal": "2.1.c", "effect": "high"}}],
+      "recommended": true,
+      "alignmentScore": 1.0
+    }},
+    {{
+      "id": "pae-002-e02",
+      "effectOperator": "<VERB from approved list>",
+      "description": "<justification for secondary choice>",
+      "timeWindow": "<urgency estimate>",
+      "stateHypothesis": "<tactical outcome>",
+      "opsLimits": [{{
+        "description": "<operational constraint>",
+        "battleEntity": "<vehicle required>",
+        "stateHypothesis": "<variables or risks>"
+      }}],
+      "goalContributions": [{{"battleGoal": "2.1.c", "effect": "medium"}}],
+      "recommended": false,
+      "alignmentScore": 0.6
+    }},
+    {{
+      "id": "pae-002-e03",
+      "effectOperator": "<VERB from approved list>",
+      "description": "<justification for tertiary choice>",
+      "timeWindow": "<urgency estimate>",
+      "stateHypothesis": "<tactical outcome>",
+      "opsLimits": [{{
+        "description": "<operational constraint>",
+        "battleEntity": "<vehicle required>",
+        "stateHypothesis": "<variables or risks>"
+      }}],
+      "goalContributions": [{{"battleGoal": "2.1.c", "effect": "low"}}],
+      "recommended": false,
+      "alignmentScore": 0.3
+    }}
+  ]
+}}
+
+REFERENCE TABLES (terms relevant to this message only):
+{context}
+
+{enriched_block}"""
+>>>>>>> Stashed changes
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +241,7 @@ def get_battle_assessment(
     enriched: dict = None,
     gbc_id: str = None,
 ) -> list:
+<<<<<<< Updated upstream
     """
     Send a tactical message to the configured AI provider and return a fully
     populated battle JSON list.
@@ -171,6 +257,8 @@ def get_battle_assessment(
     Falls back to a minimal error record on failure.
     """
     system_msg, user_msg = _build_messages(msg_content, enriched)
+=======
+>>>>>>> Stashed changes
     payload = {
         "model": lm_model,
         "messages": [
@@ -185,22 +273,29 @@ def get_battle_assessment(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
 
     def _envelope(ai_fields: dict) -> list:
-        """Wrap AI-generated fields in the full battle JSON envelope."""
-        # Merge classifier entities with AI-identified ones (deduplicated)
+        # Merge AI entities + enriched into unified lists
         ai_entities = ai_fields.get("entitiesOfInterest", [])
         if not isinstance(ai_entities, list):
             ai_entities = [ai_entities] if ai_entities else []
+<<<<<<< Updated upstream
         ai_battle   = ai_fields.get("battleEntity", [])
         if not isinstance(ai_battle, list):
             ai_battle = [ai_battle] if ai_battle else []
 
         # Merge all sources into one unified list
+=======
+        ai_battle = ai_fields.get("battleEntity", [])
+        if not isinstance(ai_battle, list):
+            ai_battle = [ai_battle] if ai_battle else []
+
+>>>>>>> Stashed changes
         extra = []
         if enriched:
             extra = (enriched.get("entities", []) +
                      enriched.get("track_numbers", []) +
                      enriched.get("callsigns", []))
 
+<<<<<<< Updated upstream
         unified = list(dict.fromkeys(ai_entities + ai_battle + extra))
 
         # entitiesOfInterest and battleEntity are always identical
@@ -215,58 +310,103 @@ def get_battle_assessment(
             "description": ai_fields.get("description", ""),
             "entitiesOfInterest": merged_entities,
             "battleEntity": merged_battle,
+=======
+        # entitiesOfInterest and battleEntity are always identical
+        unified = list(dict.fromkeys(ai_entities + ai_battle + extra))
+
+        return [{
+            "id":          str(uuid.uuid4()),
+            "requestId":   request_id,
+            **( {"gbcId": gbc_id} if gbc_id else {} ),
+            "label":       ai_fields.get("label", "Tactical Update"),
+            "description": ai_fields.get("description", ""),
+            "entitiesOfInterest": unified,
+            "battleEntity":       unified,
+>>>>>>> Stashed changes
             "battleEffects": ai_fields.get("battleEffects", []),
-            "chat": [
-                msg_content,
-                "PAE generated for pre-emptive and defensive options.",
-            ],
-            "isDone": False,
-            "originator": "rhino",
+            "chat": [msg_content, "PAE generated for pre-emptive and defensive options."],
+            "isDone":      False,
+            "originator":  "rhino",
             "lastUpdated": now,
+<<<<<<< Updated upstream
             "metadata": {},
+=======
+            "metadata":    {},
+>>>>>>> Stashed changes
         }]
 
+    def _effect_stub(eid: str, operator: str, ranking: int, recommended: bool) -> dict:
+        score_map = {1: 1.0, 2: 0.6, 3: 0.3}
+        return {
+            "id":             eid,
+            "effectOperator": operator,
+            "description":    None,
+            "timeWindow":     None,
+            "stateHypothesis": None,
+            "opsLimits":      [{"description": None, "battleEntity": None, "stateHypothesis": None}],
+            "goalContributions": [{"battleGoal": None, "effect": None}],
+            "recommended":    recommended,
+            "alignmentScore": score_map.get(ranking, 0.3),
+        }
+
     def _error_record(reason: str) -> list:
-        """Return a minimal record when the AI call fails entirely."""
         return [{
+<<<<<<< Updated upstream
             "id": str(uuid.uuid4()),
             "requestId": request_id,
             **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label": "ERROR",
+=======
+            "id":          str(uuid.uuid4()),
+            "requestId":   request_id,
+            **( {"gbcId": gbc_id} if gbc_id else {} ),
+            "label":       "ERROR",
+>>>>>>> Stashed changes
             "description": reason,
             "entitiesOfInterest": [],
-            "battleEntity": [],
+            "battleEntity":       [],
             "battleEffects": [
                 _effect_stub("pae-002-e01", "ERROR", 1, True),
                 _effect_stub("pae-002-e02", "ERROR", 2, False),
                 _effect_stub("pae-002-e03", "ERROR", 3, False),
             ],
-            "chat": [msg_content, "PAE generation failed."],
-            "isDone": False,
-            "originator": "rhino",
+            "chat":        [msg_content, "PAE generation failed."],
+            "isDone":      False,
+            "originator":  "rhino",
             "lastUpdated": now,
+<<<<<<< Updated upstream
             "metadata": {},
+=======
+            "metadata":    {},
+>>>>>>> Stashed changes
         }]
 
     def _no_pae_record() -> list:
-        """Return a minimal record when the AI determines no action is required."""
         return [{
+<<<<<<< Updated upstream
             "id": str(uuid.uuid4()),
             "requestId": request_id,
             **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label": "NO PAE ACTION REQUIRED",
+=======
+            "id":          str(uuid.uuid4()),
+            "requestId":   request_id,
+            **( {"gbcId": gbc_id} if gbc_id else {} ),
+            "label":       "NO PAE ACTION REQUIRED",
+>>>>>>> Stashed changes
             "description": "Message assessed — no pre-emptive or defensive action warranted.",
             "entitiesOfInterest": [],
-            "battleEntity": [],
+            "battleEntity":       [],
             "battleEffects": [
                 _effect_stub("pae-002-e01", "NO PAE ACTION REQUIRED", 1, True),
                 _effect_stub("pae-002-e02", "NO PAE ACTION REQUIRED", 2, False),
                 _effect_stub("pae-002-e03", "NO PAE ACTION REQUIRED", 3, False),
             ],
-            "chat": [msg_content, "PAE generated for pre-emptive and defensive options."],
-            "isDone": False,
-            "originator": "rhino",
+            "chat":        [msg_content, "PAE generated for pre-emptive and defensive options."],
+            "isDone":      False,
+            "originator":  "rhino",
             "lastUpdated": now,
+<<<<<<< Updated upstream
             "metadata": {},
         }]
 
@@ -284,6 +424,11 @@ def get_battle_assessment(
             "alignmentScore": score_map.get(ranking, 0.3),
         }
 
+=======
+            "metadata":    {},
+        }]
+
+>>>>>>> Stashed changes
     try:
         headers = {"Content-Type": "application/json"}
         if provider == "nanogpt" and api_key:
@@ -293,8 +438,6 @@ def get_battle_assessment(
         response.raise_for_status()
 
         full_response = response.json()
-        print(f"RAW API RESPONSE:\n{json.dumps(full_response, indent=2)}")
-
         raw = full_response["choices"][0]["message"]["content"].strip()
         print(f"RAW CONTENT: {repr(raw)}")
 
@@ -313,35 +456,30 @@ def get_battle_assessment(
             print("INFO: No JSON in model output — NO PAE ACTION REQUIRED.")
             return _no_pae_record()
 
-        raw = raw[brace_start : brace_end + 1]
-        print(f"EXTRACTED JSON: {repr(raw)}")
+        parsed = json.loads(raw[brace_start : brace_end + 1])
 
-        parsed = json.loads(raw)
-
-        # Validate effectOperator verbs and ensure opsLimits are fully populated
+        # Validate effectOperator verbs
         effects = parsed.get("battleEffects", [])
         for effect in effects:
-            # Validate verb
             v = effect.get("effectOperator", "").upper().strip()
             effect["effectOperator"] = v if v in ALL_VERBS else "NO PAE ACTION REQUIRED"
 
-            # Ensure opsLimits exists and every entry has the required battleEntity field
+            # Ensure opsLimits is fully populated
             ops = effect.get("opsLimits", [])
             if not ops:
                 effect["opsLimits"] = [{
-                    "description": "No specific operational constraint identified.",
-                    "battleEntity": "Unspecified",
+                    "description":     "No specific operational constraint identified.",
+                    "battleEntity":    "Unspecified",
                     "stateHypothesis": "Outcome dependent on available assets.",
                 }]
             else:
                 for op in ops:
-                    if not op.get("battleEntity"):
-                        op["battleEntity"] = "Unspecified"
-                    if not op.get("description"):
-                        op["description"] = "No specific operational constraint identified."
-                    if not op.get("stateHypothesis"):
-                        op["stateHypothesis"] = "Outcome dependent on available assets."
+                    if not op.get("battleEntity"):    op["battleEntity"]    = "Unspecified"
+                    if not op.get("description"):     op["description"]     = "No specific operational constraint identified."
+                    if not op.get("stateHypothesis"): op["stateHypothesis"] = "Outcome dependent on available assets."
 
+        raw_verbs = [e.get("effectOperator", "?") for e in effects[:3]]
+        print(f"AI raw verbs: {raw_verbs}")
         print(f"AI assessment complete — label: {parsed.get('label', '?')}")
         return _envelope(parsed)
 
@@ -352,7 +490,10 @@ def get_battle_assessment(
         print(f"WARNING: Cannot reach AI provider at {lm_url}.")
         return _error_record(f"Cannot reach AI provider at {lm_url}.")
     except requests.exceptions.HTTPError as e:
+<<<<<<< Updated upstream
         # Print the full response body so we can see exactly what LM Studio rejected
+=======
+>>>>>>> Stashed changes
         body = ""
         try:
             body = e.response.text if e.response else ""
@@ -360,7 +501,10 @@ def get_battle_assessment(
             pass
         print(f"WARNING: AI provider HTTP error: {e}.")
         print(f"WARNING: LM Studio response body: {body}")
+<<<<<<< Updated upstream
         print(f"WARNING: Payload sent:\n{json.dumps(payload, indent=2)[:2000]}")
+=======
+>>>>>>> Stashed changes
         return _error_record(f"HTTP error: {e}.")
     except (ValueError, KeyError) as e:
         print(f"WARNING: Unexpected response structure ({type(e).__name__}: {e}).")

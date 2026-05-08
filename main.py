@@ -155,6 +155,10 @@ def run_pipeline(
         print("INFO: DB not configured — skipping database write.")
 
     # -- Step 7: Push to GBC API (only if GBC_API_URL is configured in .env)
+<<<<<<< Updated upstream
+=======
+    print(f"GBC_API_URL: {config.GBC_API_URL or 'NOT SET'}")
+>>>>>>> Stashed changes
     if config.GBC_API_URL:
         gbc_api_client.push(tactical_json, api_url=config.GBC_API_URL)
     else:
@@ -169,10 +173,12 @@ def run_pipeline(
 
     # -- Step 9: Validate against PaeOutput schema and POST to orchestrator
     record = tactical_json[0]
+    print(f"SUBMITTING TO ORCHESTRATOR: {config.ORCHESTRATOR_BASE_URL}")
     try:
         pae_output = PaeOutput.model_validate(record)
         submit_pae_output(pae_output)
         submit_status = "SUBMITTED"
+        print("ORCHESTRATOR: submission OK")
     except Exception as e:
         console.log(f"[red]Failed to submit to orchestrator: {e}[/red]")
         submit_status = "SUBMIT FAILED"
