@@ -85,3 +85,19 @@ def current_state() -> dict:
         "count":   _request_count,
         "next_id": f"{day}{run}-{str(_request_count + 1).zfill(2)}",
     }
+
+
+def extract_request_id(message: str) -> str | None:
+    """
+    Extract a DDRR-rr format request ID from an IRC message.
+
+    Looks for a pattern of 4 digits, a dash, and 2 digits (e.g. 0602-02).
+    Returns the first match found, or None if no ID is present.
+
+    Examples:
+        "gen bcoa using rainmaker jtn tn044 0602-02 B pls" → "0602-02"
+        "TBM launch detected at PB1.2"                     → None
+    """
+    import re
+    match = re.search(r'\b(\d{4}-\d{2})\b', message)
+    return match.group(1) if match else None

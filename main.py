@@ -138,10 +138,10 @@ def run_pipeline(
         gbc_id=gbc_id,
     )
 
-    # -- Step 2: Write to local log (always, regardless of orchestrator availability)
+    # -- Step 5: Write to local log (always, regardless of orchestrator availability)
     log_writer.write(tactical_json)
 
-    # -- Step 3: Write to database (only if DB credentials are configured in .env)
+    # -- Step 6: Write to database (only if DB credentials are configured in .env)
     if config.DB_HOST and config.DB_NAME and config.DB_USER and config.DB_PASSWORD:
         db_writer.insert(
             tactical_json,
@@ -154,20 +154,20 @@ def run_pipeline(
     else:
         print("INFO: DB not configured — skipping database write.")
 
-    # -- Step 4: Push to GBC API (only if GBC_API_URL is configured in .env)
+    # -- Step 7: Push to GBC API (only if GBC_API_URL is configured in .env)
     if config.GBC_API_URL:
         gbc_api_client.push(tactical_json, api_url=config.GBC_API_URL)
     else:
         print("INFO: GBC_API_URL not configured — skipping GBC push.")
 
-    # -- Step 5: Forward to config server dashboard (fire and forget)
+    # -- Step 8: Forward to config server dashboard (fire and forget)
     try:
         tactical_json[0]["_source"] = source
         requests.post("http://config:8080/assessment", json=tactical_json, timeout=2)
     except Exception:
         pass  # Dashboard is optional — never block the pipeline
 
-    # -- Step 6: Validate against PaeOutput schema and POST to orchestrator
+    # -- Step 9: Validate against PaeOutput schema and POST to orchestrator
     record = tactical_json[0]
     try:
         pae_output = PaeOutput.model_validate(record)
@@ -177,7 +177,7 @@ def run_pipeline(
         console.log(f"[red]Failed to submit to orchestrator: {e}[/red]")
         submit_status = "SUBMIT FAILED"
 
-    # -- Step 7: Update dashboard
+    # -- Step 10: Update dashboard
     effects  = record.get("battleEffects", [])
     verbs    = tuple(e.get("effectOperator", "?") for e in effects[:3])
     label    = record.get("label", "?")
@@ -232,12 +232,13 @@ def on_sse_event(live: Live, event: PaeInputCreated) -> None:
         ))
         return
 
-    # -- Step 1: Format check — reject anything that doesn't look like a track number
-    # Valid track IDs start with TN followed by digits (e.g. TN700, TN044)
-    # Plain numbers like 44250, IRC timestamps, or other noise are rejected here
+    # -- Step 1: Format check — strip non-alphanumeric and validate track format
+    # Valid track IDs are 2 letters followed by digits (e.g. TN700, TS016, TL005)
+    # Plain numbers like 44250 or other noise are rejected here
     import re as _re
-    if not _re.match(r'^TN\d+$', message.strip().upper()):
-        console.log(f"[yellow]SSE: '{message}' is not a valid track number format — rejecting.[/yellow]")
+    track_clean = _re.sub(r'[^A-Za-z0-9]', '', message.strip())
+    if not _re.match(r'^[A-Za-z]{2}\d+$', track_clean):
+        console.log(f"[yellow]SSE: '{message}' (cleaned: '{track_clean}') is not a valid track format — rejecting.[/yellow]")
         live.update(make_dashboard(
             message, pae.originator, None,
             "REJECTED — INVALID TRACK FORMAT", "SSE"

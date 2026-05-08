@@ -101,115 +101,43 @@ def _get_relevant_context(msg: str) -> str:
 # SYSTEM PROMPT
 # ---------------------------------------------------------------------------
 
-def _build_system_prompt(msg: str, enriched: dict = None) -> str:
-    verb_list = ", ".join(ALL_VERBS)
-    context   = _get_relevant_context(msg)
+def _build_messages(msg: str, enriched: dict = None) -> tuple[str, str]:
+    """
+    Minimal two-message format for gemma-4-e4b's small context window.
+    Verb list is NOT sent — model picks tactical verbs, we validate after.
+    """
+    context = _get_relevant_context(msg)
 
-    # Build enriched context block if classification data was provided
+    # Build enriched block
     enriched_block = ""
     if enriched:
-        callsigns = enriched.get("callsigns", [])
-        entities  = enriched.get("entities", [])
-        tier      = enriched.get("importance_tier", "")
-        score     = enriched.get("importance_score", 0)
-        reasoning = enriched.get("reasoning", "")
+        lines = []
+        if enriched.get("callsigns"):     lines.append(f"Callsigns: {', '.join(enriched['callsigns'])}")
+        if enriched.get("track_numbers"): lines.append(f"Tracks: {', '.join(enriched['track_numbers'])}")
+        if enriched.get("entities"):      lines.append(f"Entities: {', '.join(enriched['entities'])}")
+        if enriched.get("importance_tier"): lines.append(f"Tier: {enriched['importance_tier']}")
+        if lines:
+            enriched_block = "INTEL: " + " | ".join(lines) + "\n"
 
-        track_numbers = enriched.get("track_numbers", [])
-        lines = ["PRE-CLASSIFIED CONTEXT (extracted by message classifier):"]
-        if callsigns:
-            lines.append(f"Callsigns identified: {', '.join(callsigns)}")
-        if track_numbers:
-            lines.append(f"Track numbers / JTN IDs: {', '.join(track_numbers)}")
-        if entities:
-            lines.append(f"Entities of interest: {', '.join(entities)}")
-        if tier:
-            lines.append(f"Importance: {tier} (score {score})")
-        if reasoning:
-            lines.append(f"Classifier reasoning: {reasoning}")
-        lines.append("Use this context to populate entitiesOfInterest and battleEntity accurately.")
-        enriched_block = "\n".join(lines) + "\n"
+    system_msg = (
+        "You are a tactical AI analyst. "
+        "Read the MESSAGE and return ONLY a valid JSON object. "
+        "No markdown, no explanation, no extra text."
+    )
 
-    return f"""You are a tactical AI analyst embedded in a real-time battlefield communications pipeline.
+    ref_block = ("REF: " + context + "\n") if context.strip() and "No matching" not in context else ""
 
-Your job is to analyse an incoming tactical message and return a SINGLE fully populated battle JSON object.
+    user_msg = f"""Return this JSON filled in for the message below:
+{{"label":"<title>","description":"<summary>","entitiesOfInterest":["<entity>"],"battleEntity":["<entity>"],"battleEffects":[
+{{"id":"pae-002-e01","effectOperator":"<tactical verb>","description":"<why>","timeWindow":"<0-5m>","stateHypothesis":"<outcome>","opsLimits":[{{"description":"<limit>","battleEntity":"<asset>","stateHypothesis":"<risk>"}}],"goalContributions":[{{"battleGoal":"2.1.c","effect":"high"}}],"recommended":true,"alignmentScore":1.0}},
+{{"id":"pae-002-e02","effectOperator":"<tactical verb>","description":"<why>","timeWindow":"<5-15m>","stateHypothesis":"<outcome>","opsLimits":[{{"description":"<limit>","battleEntity":"<asset>","stateHypothesis":"<risk>"}}],"goalContributions":[{{"battleGoal":"2.1.c","effect":"medium"}}],"recommended":false,"alignmentScore":0.6}},
+{{"id":"pae-002-e03","effectOperator":"<tactical verb>","description":"<why>","timeWindow":"<15-30m>","stateHypothesis":"<outcome>","opsLimits":[{{"description":"<limit>","battleEntity":"<asset>","stateHypothesis":"<risk>"}}],"goalContributions":[{{"battleGoal":"2.1.c","effect":"low"}}],"recommended":false,"alignmentScore":0.3}}
+]}}
 
-RULES:
-1. effectOperator values MUST come exclusively from the APPROVED VERB LIST. No other words.
-2. Use a DIFFERENT category (ATTACK / INVESTIGATE / DEGRADE / RESCUE / SUPPLY) for each effect slot where possible.
-   Never use the exact same verb twice.
-3. e01 = highest priority (recommended: true), e02 = secondary, e03 = tertiary.
-4. All descriptive fields must be concise and tactically relevant to the message.
-5. entitiesOfInterest and battleEntity must be identical lists — both contain the key entities, assets, and locations found in the message.
-7. timeWindow: your best estimate of urgency (e.g. "0-5m", "5-15m", "15-30m").
-8. stateHypothesis: the tactical outcome if this effect is enacted.
-9. opsLimits MUST always include ALL THREE fields: "description", "battleEntity", and "stateHypothesis".
-   "battleEntity" inside opsLimits is the specific vehicle or asset required for that effect (e.g. "EA-18G", "F-16", "Analyst").
-   NEVER omit "battleEntity" from opsLimits. It is a required field.
-10. Return ONLY valid JSON — no explanation, no markdown, no preamble.
+Rules: entitiesOfInterest and battleEntity must be the same list. opsLimits battleEntity must not be null.
+{enriched_block}{ref_block}MESSAGE: {msg}"""
 
-APPROVED VERB LIST:
-{verb_list}
-
-OUTPUT FORMAT (strict JSON, nothing else):
-{{
-  "label": "<short tactical title>",
-  "description": "<brief strategic summary of message intent>",
-  "entitiesOfInterest": ["<entity 1>", "<entity 2>"],
-  "battleEntity": ["<entity 1>", "<entity 2>"],
-  // entitiesOfInterest and battleEntity must be the same list
-  "battleEffects": [
-    {{
-      "id": "pae-002-e01",
-      "effectOperator": "<VERB from approved list>",
-      "description": "<justification for this action>",
-      "timeWindow": "<urgency estimate>",
-      "stateHypothesis": "<tactical outcome if enacted>",
-      "opsLimits": [{{
-        "description": "<operational constraint>",
-        "battleEntity": "<vehicle required for this effect>",
-        "stateHypothesis": "<variables or risks>"
-      }}],
-      "goalContributions": [{{"battleGoal": "2.1.c", "effect": "high"}}],
-      "recommended": true,
-      "alignmentScore": 1.0
-    }},
-    {{
-      "id": "pae-002-e02",
-      "effectOperator": "<VERB from approved list>",
-      "description": "<justification for secondary choice>",
-      "timeWindow": "<urgency estimate>",
-      "stateHypothesis": "<tactical outcome>",
-      "opsLimits": [{{
-        "description": "<operational constraint>",
-        "battleEntity": "<vehicle required>",
-        "stateHypothesis": "<variables or risks>"
-      }}],
-      "goalContributions": [{{"battleGoal": "2.1.c", "effect": "medium"}}],
-      "recommended": false,
-      "alignmentScore": 0.6
-    }},
-    {{
-      "id": "pae-002-e03",
-      "effectOperator": "<VERB from approved list>",
-      "description": "<justification for tertiary choice>",
-      "timeWindow": "<urgency estimate>",
-      "stateHypothesis": "<tactical outcome>",
-      "opsLimits": [{{
-        "description": "<operational constraint>",
-        "battleEntity": "<vehicle required>",
-        "stateHypothesis": "<variables or risks>"
-      }}],
-      "goalContributions": [{{"battleGoal": "2.1.c", "effect": "low"}}],
-      "recommended": false,
-      "alignmentScore": 0.3
-    }}
-  ]
-}}
-
-REFERENCE TABLES (terms relevant to this message only):
-{context}
-
-{enriched_block}"""
+    return system_msg, user_msg
 
 
 # ---------------------------------------------------------------------------
@@ -242,13 +170,14 @@ def get_battle_assessment(
     A list containing one battle JSON dict ready for output.
     Falls back to a minimal error record on failure.
     """
+    system_msg, user_msg = _build_messages(msg_content, enriched)
     payload = {
         "model": lm_model,
         "messages": [
-            {"role": "system", "content": _build_system_prompt(msg_content, enriched)},
-            {"role": "user",   "content": f"TACTICAL MESSAGE: {msg_content}"},
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
         ],
-        "temperature": 0,
+        "temperature": 0.1,
         "stream": False,
     }
 
@@ -423,7 +352,15 @@ def get_battle_assessment(
         print(f"WARNING: Cannot reach AI provider at {lm_url}.")
         return _error_record(f"Cannot reach AI provider at {lm_url}.")
     except requests.exceptions.HTTPError as e:
+        # Print the full response body so we can see exactly what LM Studio rejected
+        body = ""
+        try:
+            body = e.response.text if e.response else ""
+        except Exception:
+            pass
         print(f"WARNING: AI provider HTTP error: {e}.")
+        print(f"WARNING: LM Studio response body: {body}")
+        print(f"WARNING: Payload sent:\n{json.dumps(payload, indent=2)[:2000]}")
         return _error_record(f"HTTP error: {e}.")
     except (ValueError, KeyError) as e:
         print(f"WARNING: Unexpected response structure ({type(e).__name__}: {e}).")
