@@ -94,6 +94,32 @@ EDITABLE_FIELDS = {
         "placeholder": "your-api-key-here",
         "type":        "password",
     },
+    "RUN_DAY": {
+        "label":       "Run Day (DD)",
+        "description": "Day number for the DDRR-rr request ID format (e.g. 01)",
+        "placeholder": "01",
+        "type":        "number",
+        "section":     "run",
+    },
+    "RUN_NUMBER": {
+        "label":       "Run Number (RR)",
+        "description": "Run number within the day — changing this resets the request counter",
+        "placeholder": "01",
+        "type":        "number",
+        "section":     "run",
+    },
+    "TRACK_API_URL": {
+        "label":       "Track API URL",
+        "description": "Base URL for track validation on SSE retriggers — e.g. http://10.5.185.29:3021/tracks",
+        "placeholder": "http://10.5.185.29:3021/tracks",
+        "type":        "url",
+    },
+    "TRACK_API_TIMEOUT": {
+        "label":       "Track API Timeout (seconds)",
+        "description": "Max time to wait for track validation before rejecting the retrigger",
+        "placeholder": "5",
+        "type":        "number",
+    },
     "CLASSIFY_API_URL": {
         "label":       "Classify API URL",
         "description": "Message enrichment endpoint — adds callsigns and entities to AI context",
@@ -259,6 +285,10 @@ class EnvUpdate(BaseModel):
 # ROUTES — config
 # ---------------------------------------------------------------------------
 
+# Import builder for counter control
+from pipeline.builder import reset_counter as _reset_counter, current_state as _counter_state
+
+
 @app.get("/env")
 def get_env():
     current = read_env()
@@ -294,6 +324,19 @@ def get_status():
         "irc_channel":  current.get("IRC_CHANNEL", "NOT SET"),
         "db_status":    db_status,
     }
+
+@app.get("/run/state")
+def get_run_state():
+    """Return current day, run number and request counter for the UI."""
+    return _counter_state()
+
+
+@app.post("/run/reset")
+def reset_run_counter():
+    """Reset the request counter to 0. Call this at the start of each test run."""
+    _reset_counter()
+    return {"status": "reset", **_counter_state()}
+
 
 # ---------------------------------------------------------------------------
 # ROUTES — assessments
@@ -463,6 +506,20 @@ CONFIG_HTML = """<!DOCTYPE html>
     .toast.show{transform:translateY(0);opacity:1;}
     .toast.error{border-left-color:var(--error);color:var(--error);}
     .toast.success{color:var(--success);}
+    .run-panel{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent3);padding:20px 24px;margin-bottom:32px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;}
+    .run-fields{display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
+    .run-field{display:flex;flex-direction:column;gap:6px;}
+    .run-field label{font-family:var(--mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);}
+    .run-field input{background:var(--bg);border:1px solid var(--border);color:var(--accent3);font-family:var(--mono);font-size:18px;font-weight:700;padding:8px 14px;width:80px;text-align:center;outline:none;transition:.2s;}
+    .run-field input:focus{border-color:var(--accent3);box-shadow:0 0 0 1px var(--accent3);}
+    .run-id-preview{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--accent3);letter-spacing:2px;}
+    .run-id-label{font-family:var(--mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
+    .run-actions{display:flex;gap:10px;align-items:center;}
+    .btn-run{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:10px 20px;border:1px solid var(--accent3);color:var(--accent3);background:transparent;cursor:pointer;transition:.15s;}
+    .btn-run:hover{background:rgba(127,255,107,.08);}
+    .btn-reset-run{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:10px 20px;border:1px solid var(--accent2);color:var(--accent2);background:transparent;cursor:pointer;transition:.15s;}
+    .btn-reset-run:hover{background:rgba(255,107,53,.08);}
+    .run-counter{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;}
     .warning-box{background:rgba(255,107,53,.08);border:1px solid rgba(255,107,53,.3);border-left:3px solid var(--accent2);padding:14px 20px;margin-bottom:32px;font-size:12px;color:var(--accent2);font-family:var(--mono);line-height:1.6;}
     .field.db-field{border-left:3px solid #a855f7;}
     .db-section-title{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:#a855f7;font-family:var(--mono);margin-bottom:24px;margin-top:8px;display:flex;align-items:center;gap:12px;}
@@ -490,6 +547,27 @@ CONFIG_HTML = """<!DOCTYPE html>
     <div class="status-item"><label>IRC Server</label><div class="val" id="st-irc">loading...</div></div>
     <div class="status-item"><label>Active Model</label><div class="val" id="st-model">loading...</div></div>
     <div class="status-item"><label>Database</label><div class="val" id="st-db">loading...</div></div>
+  </div>
+  <div class="run-panel">
+    <div>
+      <div class="run-id-label">Current Request ID Format</div>
+      <div class="run-id-preview" id="run-preview">????-??</div>
+      <div class="run-counter" id="run-counter">requests this run: 0</div>
+    </div>
+    <div class="run-fields">
+      <div class="run-field">
+        <label>Day (DD)</label>
+        <input type="number" id="run-day" min="1" max="99" value="1" oninput="updateRunPreview()"/>
+      </div>
+      <div class="run-field">
+        <label>Run (RR)</label>
+        <input type="number" id="run-run" min="1" max="99" value="1" oninput="updateRunPreview()"/>
+      </div>
+    </div>
+    <div class="run-actions">
+      <button class="btn-run" onclick="saveRun()">Set Run</button>
+      <button class="btn-reset-run" onclick="resetCounter()">Reset Counter</button>
+    </div>
   </div>
   <div class="warning-box">⚠ Changes are written to .env immediately and take effect on the next message. To switch between LM Studio and NanoGPT, update the AI Endpoint URL field.</div>
   <div class="section-title">Configuration Fields</div>
@@ -614,7 +692,33 @@ CONFIG_HTML = """<!DOCTYPE html>
 
   function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-  loadEnv();loadStatus();setInterval(loadStatus,10000);
+  async function loadRunState(){
+    try{
+      const res=await fetch('/run/state');const d=await res.json();
+      document.getElementById('run-day').value=parseInt(d.day)||1;
+      document.getElementById('run-run').value=parseInt(d.run)||1;
+      document.getElementById('run-counter').textContent='requests this run: '+d.count;
+      updateRunPreview();
+    }catch(e){}
+  }
+  function updateRunPreview(){
+    const dd=String(document.getElementById('run-day').value||1).padStart(2,'0');
+    const rr=String(document.getElementById('run-run').value||1).padStart(2,'0');
+    document.getElementById('run-preview').textContent=dd+rr+'-??';
+  }
+  async function saveRun(){
+    const dd=String(document.getElementById('run-day').value||1).padStart(2,'0');
+    const rr=String(document.getElementById('run-run').value||1).padStart(2,'0');
+    const res=await fetch('/env',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:{RUN_DAY:dd,RUN_NUMBER:rr}})});
+    if(res.ok){showToast('Run set to Day '+dd+' Run '+rr,true);await loadRunState();}
+    else showToast('Save failed.',false);
+  }
+  async function resetCounter(){
+    const res=await fetch('/run/reset',{method:'POST'});
+    if(res.ok){showToast('Counter reset to 0',true);await loadRunState();}
+    else showToast('Reset failed.',false);
+  }
+  loadEnv();loadStatus();loadRunState();setInterval(loadStatus,10000);setInterval(loadRunState,5000);
 </script>
 </body>
 </html>"""

@@ -85,7 +85,9 @@ def extract_context(classification: dict) -> dict:
 
     Returns a dict with:
         callsigns          — list of identified callsigns
-        entities           — flat list of all entity values (JTN, track IDs, contacts, coords)
+        callsigns          — identified callsigns from entities_referenced and matched_bins
+        track_numbers      — track numbers and JTN IDs from entities_referenced and matched_bins
+        entities           — coordinates, mission numbers, contacts, BMA names
         importance_tier    — "HIGH_VALUE", "LOW_VALUE" etc.
         importance_score   — numeric score (1-3)
         confidence         — model confidence (0.0-1.0)
@@ -94,6 +96,7 @@ def extract_context(classification: dict) -> dict:
     if not classification:
         return {
             "callsigns":       [],
+            "track_numbers":   [],
             "entities":        [],
             "importance_tier": "",
             "importance_score": 0,
@@ -104,21 +107,27 @@ def extract_context(classification: dict) -> dict:
     entities_ref = classification.get("entities_referenced", {})
     matched_bins = classification.get("matched_bins", {})
 
-    # Callsigns from entities_referenced and matched_bins
-    callsigns = list(set(
+    # Callsigns — from entities_referenced and matched_bins
+    callsigns = list(dict.fromkeys(
         entities_ref.get("callsigns", []) +
         matched_bins.get("callsign", [])
     ))
 
-    # All other entity types flattened into one list
-    entity_fields = ["track_numbers", "coordinates", "mission_numbers", "bma_names"]
+    # Track numbers — from entities_referenced and matched_bins trackid/jtn
+    track_numbers = list(dict.fromkeys(
+        entities_ref.get("track_numbers", []) +
+        matched_bins.get("trackid", []) +
+        matched_bins.get("jtn", [])
+    ))
+
+    # All other entities flattened
+    entity_fields = ["coordinates", "mission_numbers", "bma_names"]
     entities = []
     for field in entity_fields:
         entities.extend(entities_ref.get(field, []))
 
-    # Add JTN and track IDs from matched_bins
-    for key in ["jtn", "trackid", "contact"]:
-        entities.extend(matched_bins.get(key, []))
+    # Add contacts from matched_bins
+    entities.extend(matched_bins.get("contact", []))
 
     # Deduplicate while preserving order
     seen = set()
@@ -130,9 +139,73 @@ def extract_context(classification: dict) -> dict:
 
     return {
         "callsigns":        callsigns,
+        "track_numbers":    track_numbers,
         "entities":         unique_entities,
         "importance_tier":  classification.get("importance_tier", ""),
         "importance_score": classification.get("importance_score", 0),
         "confidence":       classification.get("confidence", 0.0),
         "reasoning":        classification.get("reasoning", ""),
     }
+
+
+def fetch_track(track_id: str, api_url: str, timeout: int = 5) -> dict | None:
+    """
+    Fetch track data from the track API for a given track ID.
+
+    Used exclusively by the SSE path to validate that a retrigger event
+    has real track data before committing to a full AI assessment.
+
+    Parameters
+    ----------
+    track_id  : Track identifier extracted from the SSE event (e.g. "TN700").
+    api_url   : Base URL of the track API (e.g. "http://10.5.185.29:3021/tracks").
+    timeout   : Request timeout in seconds.
+
+    Returns
+    -------
+    dict  — track data if the track exists and has content.
+    None  — if the track does not exist, returns empty, or any error occurs.
+            A None return means the SSE retrigger should be rejected.
+    """
+    url = f"{api_url.rstrip('/')}/{track_id}"
+
+    try:
+        response = requests.get(url, timeout=timeout, headers={"accept": "*/*"})
+
+        if response.status_code == 404:
+            print(f"TRACK API: {track_id} not found (404) — rejecting SSE retrigger.")
+            return None
+
+        response.raise_for_status()
+
+        # Try to parse as JSON
+        try:
+            data = response.json()
+        except Exception:
+            # Non-JSON response — check if body has any content
+            if response.text.strip():
+                print(f"TRACK API: {track_id} returned non-JSON content.")
+                return {"raw": response.text.strip()}
+            print(f"TRACK API: {track_id} returned empty body — rejecting SSE retrigger.")
+            return None
+
+        # Reject if the response is empty (None, [], {})
+        if not data:
+            print(f"TRACK API: {track_id} returned empty data — rejecting SSE retrigger.")
+            return None
+
+        print(f"TRACK API: {track_id} found — {len(str(data))} bytes of track data.")
+        return data
+
+    except requests.exceptions.Timeout:
+        print(f"TRACK API: timed out fetching {track_id} — rejecting SSE retrigger.")
+        return None
+    except requests.exceptions.ConnectionError:
+        print(f"TRACK API: cannot reach {api_url} — rejecting SSE retrigger.")
+        return None
+    except requests.exceptions.HTTPError as e:
+        print(f"TRACK API: HTTP error {e} for {track_id} — rejecting SSE retrigger.")
+        return None
+    except Exception as e:
+        print(f"TRACK API: unexpected error ({e}) — rejecting SSE retrigger.")
+        return None

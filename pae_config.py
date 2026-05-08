@@ -25,6 +25,18 @@ AI_API_KEY  = os.getenv("AI_API_KEY",  "")
 AI_TIMEOUT  = int(os.getenv("AI_TIMEOUT", "60") or "60")
 
 # ---------------------------------------------------------------------------
+# Test Run — controls the DDRR-rr request ID format
+# ---------------------------------------------------------------------------
+RUN_DAY    = os.getenv("RUN_DAY",    "01")  # DD — day number
+RUN_NUMBER = os.getenv("RUN_NUMBER", "01")  # RR — run number within the day
+
+# ---------------------------------------------------------------------------
+# Track API — validates SSE retrigger events by fetching track data
+# ---------------------------------------------------------------------------
+TRACK_API_URL     = os.getenv("TRACK_API_URL", "")   # e.g. http://10.5.185.29:3021/tracks
+TRACK_API_TIMEOUT = int(os.getenv("TRACK_API_TIMEOUT", "5") or "5")
+
+# ---------------------------------------------------------------------------
 # Classify API — enriches messages with callsigns and entities before assessment
 # ---------------------------------------------------------------------------
 CLASSIFY_API_URL     = os.getenv("CLASSIFY_API_URL", "")  # e.g. http://10.5.185.30:3060/classify

@@ -10,7 +10,7 @@ from irc.listener import start as irc_start
 from output import log_writer, db_writer, gbc_api_client
 from pipeline.builder import make_request_id
 from pipeline.triage import is_relevant
-from pipeline.enricher import classify, extract_context
+from pipeline.enricher import classify, extract_context, fetch_track
 from schemas.pae_schemas import PaeInputCreated, PaeOutput
 
 from datetime import datetime
@@ -135,6 +135,7 @@ def run_pipeline(
         provider=ai["provider"],
         api_key=ai["api_key"],
         enriched=enriched,
+        gbc_id=gbc_id,
     )
 
     # -- Step 2: Write to local log (always, regardless of orchestrator availability)
@@ -213,6 +214,10 @@ def on_sse_event(live: Live, event: PaeInputCreated) -> None:
     Called by PaeSseClient for every PaeInputCreated event from the orchestrator.
 
     The trackId field carries the message text to reassess.
+    Before running the AI pipeline, the track ID is validated against the
+    Track API. If the API returns empty or no data the retrigger is rejected —
+    there is no point assessing a message with no associated track data.
+
     The requestId and originator come directly from the SSE payload.
     """
     pae = event.pae_input
@@ -220,8 +225,44 @@ def on_sse_event(live: Live, event: PaeInputCreated) -> None:
     message = pae.track_id  # trackId IS the message text for reassessment
 
     if not message:
-        console.log("[yellow]SSE event received with empty trackId — skipping.[/yellow]")
+        console.log("[yellow]SSE: empty trackId — skipping.[/yellow]")
+        live.update(make_dashboard(
+            message or "—", pae.originator, None,
+            "REJECTED — NO TRACK ID", "SSE"
+        ))
         return
+
+    # -- Step 1: Format check — reject anything that doesn't look like a track number
+    # Valid track IDs start with TN followed by digits (e.g. TN700, TN044)
+    # Plain numbers like 44250, IRC timestamps, or other noise are rejected here
+    import re as _re
+    if not _re.match(r'^TN\d+$', message.strip().upper()):
+        console.log(f"[yellow]SSE: '{message}' is not a valid track number format — rejecting.[/yellow]")
+        live.update(make_dashboard(
+            message, pae.originator, None,
+            "REJECTED — INVALID TRACK FORMAT", "SSE"
+        ))
+        return
+
+    # -- Step 2: Validate track against Track API
+    if config.TRACK_API_URL:
+        live.update(make_dashboard(message, pae.originator, None, "VALIDATING TRACK...", "SSE"))
+        track_data = fetch_track(
+            track_id=message.strip().upper(),
+            api_url=config.TRACK_API_URL,
+            timeout=config.TRACK_API_TIMEOUT,
+        )
+        if track_data is None:
+            console.log(f"[yellow]SSE: track '{message}' not found — rejecting retrigger.[/yellow]")
+            live.update(make_dashboard(
+                message, pae.originator, None,
+                "REJECTED — NO TRACK DATA", "SSE"
+            ))
+            return
+        console.log(f"[green]SSE: track '{message}' validated — proceeding to assessment.[/green]")
+    else:
+        # TRACK_API_URL not configured — log warning but allow through
+        console.log(f"[yellow]SSE: TRACK_API_URL not set — skipping track validation for '{message}'.[/yellow]")
 
     run_pipeline(
         live=live,

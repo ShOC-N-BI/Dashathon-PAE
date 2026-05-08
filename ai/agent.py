@@ -114,9 +114,12 @@ def _build_system_prompt(msg: str, enriched: dict = None) -> str:
         score     = enriched.get("importance_score", 0)
         reasoning = enriched.get("reasoning", "")
 
+        track_numbers = enriched.get("track_numbers", [])
         lines = ["PRE-CLASSIFIED CONTEXT (extracted by message classifier):"]
         if callsigns:
             lines.append(f"Callsigns identified: {', '.join(callsigns)}")
+        if track_numbers:
+            lines.append(f"Track numbers / JTN IDs: {', '.join(track_numbers)}")
         if entities:
             lines.append(f"Entities of interest: {', '.join(entities)}")
         if tier:
@@ -136,8 +139,7 @@ RULES:
    Never use the exact same verb twice.
 3. e01 = highest priority (recommended: true), e02 = secondary, e03 = tertiary.
 4. All descriptive fields must be concise and tactically relevant to the message.
-5. entitiesOfInterest: key locations, coordinates, or named systems found in the message.
-6. battleEntity: the vehicle or actor types involved (e.g. "TBM", "SAT", "F-16").
+5. entitiesOfInterest and battleEntity must be identical lists — both contain the key entities, assets, and locations found in the message.
 7. timeWindow: your best estimate of urgency (e.g. "0-5m", "5-15m", "15-30m").
 8. stateHypothesis: the tactical outcome if this effect is enacted.
 9. opsLimits MUST always include ALL THREE fields: "description", "battleEntity", and "stateHypothesis".
@@ -152,8 +154,9 @@ OUTPUT FORMAT (strict JSON, nothing else):
 {{
   "label": "<short tactical title>",
   "description": "<brief strategic summary of message intent>",
-  "entitiesOfInterest": ["<key term or location>"],
-  "battleEntity": ["<vehicle or actor type>"],
+  "entitiesOfInterest": ["<entity 1>", "<entity 2>"],
+  "battleEntity": ["<entity 1>", "<entity 2>"],
+  // entitiesOfInterest and battleEntity must be the same list
   "battleEffects": [
     {{
       "id": "pae-002-e01",
@@ -168,7 +171,7 @@ OUTPUT FORMAT (strict JSON, nothing else):
       }}],
       "goalContributions": [{{"battleGoal": "2.1.c", "effect": "high"}}],
       "recommended": true,
-      "ranking": 1
+      "alignmentScore": 1.0
     }},
     {{
       "id": "pae-002-e02",
@@ -183,7 +186,7 @@ OUTPUT FORMAT (strict JSON, nothing else):
       }}],
       "goalContributions": [{{"battleGoal": "2.1.c", "effect": "medium"}}],
       "recommended": false,
-      "ranking": 2
+      "alignmentScore": 0.6
     }},
     {{
       "id": "pae-002-e03",
@@ -198,7 +201,7 @@ OUTPUT FORMAT (strict JSON, nothing else):
       }}],
       "goalContributions": [{{"battleGoal": "2.1.c", "effect": "low"}}],
       "recommended": false,
-      "ranking": 3
+      "alignmentScore": 0.3
     }}
   ]
 }}
@@ -223,6 +226,7 @@ def get_battle_assessment(
     provider: str = "lmstudio",
     api_key: str = "",
     enriched: dict = None,
+    gbc_id: str = None,
 ) -> list:
     """
     Send a tactical message to the configured AI provider and return a fully
@@ -255,22 +259,31 @@ def get_battle_assessment(
         """Wrap AI-generated fields in the full battle JSON envelope."""
         # Merge classifier entities with AI-identified ones (deduplicated)
         ai_entities = ai_fields.get("entitiesOfInterest", [])
+        if not isinstance(ai_entities, list):
+            ai_entities = [ai_entities] if ai_entities else []
         ai_battle   = ai_fields.get("battleEntity", [])
+        if not isinstance(ai_battle, list):
+            ai_battle = [ai_battle] if ai_battle else []
+
+        # Merge all sources into one unified list
+        extra = []
         if enriched:
-            extra_entities = enriched.get("entities", [])
-            extra_callsigns = enriched.get("callsigns", [])
-            merged_entities = list(dict.fromkeys(ai_entities + extra_entities))
-            merged_battle   = list(dict.fromkeys(ai_battle + extra_callsigns))
-        else:
-            merged_entities = ai_entities
-            merged_battle   = ai_battle
+            extra = (enriched.get("entities", []) +
+                     enriched.get("track_numbers", []) +
+                     enriched.get("callsigns", []))
+
+        unified = list(dict.fromkeys(ai_entities + ai_battle + extra))
+
+        # entitiesOfInterest and battleEntity are always identical
+        merged_entities = unified
+        merged_battle   = unified
 
         return [{
             "id": str(uuid.uuid4()),
             "requestId": request_id,
+            **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label": ai_fields.get("label", "Tactical Update"),
             "description": ai_fields.get("description", ""),
-            "gbcId": None,
             "entitiesOfInterest": merged_entities,
             "battleEntity": merged_battle,
             "battleEffects": ai_fields.get("battleEffects", []),
@@ -281,6 +294,7 @@ def get_battle_assessment(
             "isDone": False,
             "originator": "rhino",
             "lastUpdated": now,
+            "metadata": {},
         }]
 
     def _error_record(reason: str) -> list:
@@ -288,9 +302,9 @@ def get_battle_assessment(
         return [{
             "id": str(uuid.uuid4()),
             "requestId": request_id,
+            **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label": "ERROR",
             "description": reason,
-            "gbcId": None,
             "entitiesOfInterest": [],
             "battleEntity": [],
             "battleEffects": [
@@ -302,6 +316,7 @@ def get_battle_assessment(
             "isDone": False,
             "originator": "rhino",
             "lastUpdated": now,
+            "metadata": {},
         }]
 
     def _no_pae_record() -> list:
@@ -309,9 +324,9 @@ def get_battle_assessment(
         return [{
             "id": str(uuid.uuid4()),
             "requestId": request_id,
+            **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label": "NO PAE ACTION REQUIRED",
             "description": "Message assessed — no pre-emptive or defensive action warranted.",
-            "gbcId": None,
             "entitiesOfInterest": [],
             "battleEntity": [],
             "battleEffects": [
@@ -323,9 +338,11 @@ def get_battle_assessment(
             "isDone": False,
             "originator": "rhino",
             "lastUpdated": now,
+            "metadata": {},
         }]
 
     def _effect_stub(eid: str, operator: str, ranking: int, recommended: bool) -> dict:
+        score_map = {1: 1.0, 2: 0.6, 3: 0.3}
         return {
             "id": eid,
             "effectOperator": operator,
@@ -335,7 +352,7 @@ def get_battle_assessment(
             "opsLimits": [{"description": None, "battleEntity": None, "stateHypothesis": None}],
             "goalContributions": [{"battleGoal": None, "effect": None}],
             "recommended": recommended,
-            "ranking": ranking,
+            "alignmentScore": score_map.get(ranking, 0.3),
         }
 
     try:

@@ -51,7 +51,7 @@ class PaeEffect(BaseModel):
     ops_limits:         list[OpsLimit]         = Field(alias="opsLimits",         default_factory=list)
     goal_contributions: list[GoalContribution] = Field(alias="goalContributions", default_factory=list)
     recommended:        bool
-    ranking:            Optional[int]          = None
+    alignment_score:    Optional[float]        = Field(alias="alignmentScore", default=None)
     model_config = {"populate_by_name": True}
 
     @field_validator("description", "time_window", "state_hypothesis", mode="before")
@@ -84,14 +84,15 @@ class PaeOutput(BaseModel):
     label:                str
     description:          str
     request_id:           str                 = Field(alias="requestId")
-    gbc_id:               Optional[str]       = Field(alias="gbcId",              default=None)
-    entities_of_interest: list[str]           = Field(alias="entitiesOfInterest", default_factory=list)
+    gbc_id:               Optional[str]        = Field(alias="gbcId",              default=None)
+    entities_of_interest: list[str]            = Field(alias="entitiesOfInterest", default_factory=list)
     battle_entity:        Optional[list[str]] = Field(alias="battleEntity",       default=None)
     battle_effects:       list[PaeEffect]     = Field(alias="battleEffects",      default_factory=list)
     chat:                 list[str]           = Field(default_factory=list)
     is_done:              bool                = Field(alias="isDone")
     originator:           Optional[str]       = None
     last_updated:         datetime            = Field(alias="lastUpdated")
+    metadata:             Optional[dict]      = Field(default=None)
     model_config = {"populate_by_name": True}
 
     @field_validator("entities_of_interest", mode="before")
@@ -100,7 +101,7 @@ class PaeOutput(BaseModel):
         if v is None:
             return []
         if isinstance(v, str):
-            return [v]
+            return [v] if v.strip() else []
         if not isinstance(v, list):
             return []
         return [str(i) for i in v if i]
