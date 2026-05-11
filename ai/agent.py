@@ -101,31 +101,10 @@ def _get_relevant_context(msg: str) -> str:
 # SYSTEM PROMPT  — original, unchanged
 # ---------------------------------------------------------------------------
 
-def _build_messages(msg: str, enriched: dict = None) -> tuple[str, str]:
-    """
-    Minimal two-message format for gemma-4-e4b's small context window.
-    Verb list is NOT sent — model picks tactical verbs, we validate after.
-    """
-    context = _get_relevant_context(msg)
+def _build_system_prompt(msg: str, enriched: dict = None) -> str:
+    verb_list = ", ".join(ALL_VERBS)
+    context   = _get_relevant_context(msg)
 
-<<<<<<< Updated upstream
-    # Build enriched block
-    enriched_block = ""
-    if enriched:
-        lines = []
-        if enriched.get("callsigns"):     lines.append(f"Callsigns: {', '.join(enriched['callsigns'])}")
-        if enriched.get("track_numbers"): lines.append(f"Tracks: {', '.join(enriched['track_numbers'])}")
-        if enriched.get("entities"):      lines.append(f"Entities: {', '.join(enriched['entities'])}")
-        if enriched.get("importance_tier"): lines.append(f"Tier: {enriched['importance_tier']}")
-        if lines:
-            enriched_block = "INTEL: " + " | ".join(lines) + "\n"
-
-    system_msg = (
-        "You are a tactical AI analyst. "
-        "Read the MESSAGE and return ONLY a valid JSON object. "
-        "No markdown, no explanation, no extra text."
-    )
-=======
     enriched_block = ""
     if enriched:
         callsigns     = enriched.get("callsigns", [])
@@ -143,23 +122,26 @@ def _build_messages(msg: str, enriched: dict = None) -> tuple[str, str]:
         if reasoning:     lines.append(f"Classifier reasoning: {reasoning}")
         lines.append("Use this context to populate entitiesOfInterest and battleEntity accurately.")
         enriched_block = "\n".join(lines) + "\n"
->>>>>>> Stashed changes
 
-    ref_block = ("REF: " + context + "\n") if context.strip() and "No matching" not in context else ""
+    return f"""You are a tactical AI analyst embedded in a real-time battlefield communications pipeline.
 
-    user_msg = f"""Return this JSON filled in for the message below:
-{{"label":"<title>","description":"<summary>","entitiesOfInterest":["<entity>"],"battleEntity":["<entity>"],"battleEffects":[
-{{"id":"pae-002-e01","effectOperator":"<tactical verb>","description":"<why>","timeWindow":"<0-5m>","stateHypothesis":"<outcome>","opsLimits":[{{"description":"<limit>","battleEntity":"<asset>","stateHypothesis":"<risk>"}}],"goalContributions":[{{"battleGoal":"2.1.c","effect":"high"}}],"recommended":true,"alignmentScore":1.0}},
-{{"id":"pae-002-e02","effectOperator":"<tactical verb>","description":"<why>","timeWindow":"<5-15m>","stateHypothesis":"<outcome>","opsLimits":[{{"description":"<limit>","battleEntity":"<asset>","stateHypothesis":"<risk>"}}],"goalContributions":[{{"battleGoal":"2.1.c","effect":"medium"}}],"recommended":false,"alignmentScore":0.6}},
-{{"id":"pae-002-e03","effectOperator":"<tactical verb>","description":"<why>","timeWindow":"<15-30m>","stateHypothesis":"<outcome>","opsLimits":[{{"description":"<limit>","battleEntity":"<asset>","stateHypothesis":"<risk>"}}],"goalContributions":[{{"battleGoal":"2.1.c","effect":"low"}}],"recommended":false,"alignmentScore":0.3}}
-]}}
+Your job is to analyse an incoming tactical message and return a SINGLE fully populated battle JSON object.
 
-Rules: entitiesOfInterest and battleEntity must be the same list. opsLimits battleEntity must not be null.
-{enriched_block}{ref_block}MESSAGE: {msg}"""
+RULES:
+1. effectOperator values MUST come exclusively from the APPROVED VERB LIST. No other words.
+2. Use a DIFFERENT category (ATTACK / INVESTIGATE / DEGRADE / RESCUE / SUPPLY) for each effect slot where possible.
+   Never use the exact same verb twice.
+3. e01 = highest priority (recommended: true), e02 = secondary, e03 = tertiary.
+4. All descriptive fields must be concise and tactically relevant to the message.
+5. entitiesOfInterest: ONE item only — the single most important subject of the message (e.g. a track number, callsign, or named target). Always a list with exactly one entry.
+6. battleEntity: ONE item only — must equal entitiesOfInterest. Always a list with exactly one entry.
+7. timeWindow: your best estimate of urgency (e.g. "0-5m", "5-15m", "15-30m").
+8. stateHypothesis: the tactical outcome if this effect is enacted.
+9. opsLimits MUST always include ALL THREE fields: "description", "battleEntity", and "stateHypothesis".
+   "battleEntity" inside opsLimits is the specific vehicle or asset required for that effect (e.g. "EA-18G", "F-16", "Analyst").
+   NEVER omit "battleEntity" from opsLimits. It is a required field.
+10. Return ONLY valid JSON — no explanation, no markdown, no preamble.
 
-<<<<<<< Updated upstream
-    return system_msg, user_msg
-=======
 APPROVED VERB LIST:
 {verb_list}
 
@@ -167,8 +149,8 @@ OUTPUT FORMAT (strict JSON, nothing else):
 {{
   "label": "<short tactical title>",
   "description": "<brief strategic summary of message intent>",
-  "entitiesOfInterest": ["<key term or location>"],
-  "battleEntity": ["<vehicle or actor type>"],
+  "entitiesOfInterest": ["<single most important subject>"],
+  "battleEntity": ["<same single subject>"],
   "battleEffects": [
     {{
       "id": "pae-002-e01",
@@ -222,7 +204,6 @@ REFERENCE TABLES (terms relevant to this message only):
 {context}
 
 {enriched_block}"""
->>>>>>> Stashed changes
 
 
 # ---------------------------------------------------------------------------
@@ -241,29 +222,11 @@ def get_battle_assessment(
     enriched: dict = None,
     gbc_id: str = None,
 ) -> list:
-<<<<<<< Updated upstream
-    """
-    Send a tactical message to the configured AI provider and return a fully
-    populated battle JSON list.
-
-    Parameters
-    ----------
-    provider : "lmstudio" or "nanogpt"
-    api_key  : Required for NanoGPT. Leave blank for LM Studio.
-
-    Returns
-    -------
-    A list containing one battle JSON dict ready for output.
-    Falls back to a minimal error record on failure.
-    """
-    system_msg, user_msg = _build_messages(msg_content, enriched)
-=======
->>>>>>> Stashed changes
     payload = {
         "model": lm_model,
         "messages": [
-            {"role": "system", "content": system_msg},
-            {"role": "user",   "content": user_msg},
+            {"role": "system", "content": _build_system_prompt(msg_content, enriched)},
+            {"role": "user",   "content": f"TACTICAL MESSAGE: {msg_content}"},
         ],
         "temperature": 0.1,
         "stream": False,
@@ -272,67 +235,76 @@ def get_battle_assessment(
     raw = ""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
 
-    def _envelope(ai_fields: dict) -> list:
-        # Merge AI entities + enriched into unified lists
+    def _pick_most_important(ai_fields: dict) -> list:
+        """
+        Pick the single most important subject from all sources in priority order:
+        1. Track number from classifier (most specific tactical identifier)
+        2. AI-identified entitiesOfInterest first item
+        3. AI-identified battleEntity first item
+        4. Classifier callsign
+        Returns a list with exactly one item, or empty list if nothing found.
+        """
+        # Priority 1: track number from classifier
+        if enriched and enriched.get("track_numbers"):
+            return [enriched["track_numbers"][0]]
+
+        # Priority 2: AI's entitiesOfInterest
         ai_entities = ai_fields.get("entitiesOfInterest", [])
-        if not isinstance(ai_entities, list):
-            ai_entities = [ai_entities] if ai_entities else []
-<<<<<<< Updated upstream
-        ai_battle   = ai_fields.get("battleEntity", [])
-        if not isinstance(ai_battle, list):
-            ai_battle = [ai_battle] if ai_battle else []
+        if isinstance(ai_entities, str) and ai_entities:
+            return [ai_entities]
+        if isinstance(ai_entities, list) and ai_entities:
+            first = next((e for e in ai_entities if e), None)
+            if first:
+                return [first]
 
-        # Merge all sources into one unified list
-=======
+        # Priority 3: AI's battleEntity
         ai_battle = ai_fields.get("battleEntity", [])
-        if not isinstance(ai_battle, list):
-            ai_battle = [ai_battle] if ai_battle else []
+        if isinstance(ai_battle, str) and ai_battle:
+            return [ai_battle]
+        if isinstance(ai_battle, list) and ai_battle:
+            first = next((e for e in ai_battle if e), None)
+            if first:
+                return [first]
 
->>>>>>> Stashed changes
-        extra = []
+        # Priority 4: classifier callsign
         if enriched:
-            extra = (enriched.get("entities", []) +
-                     enriched.get("track_numbers", []) +
-                     enriched.get("callsigns", []))
+            callsigns = [c for c in enriched.get("callsigns", []) if not c.startswith("unknown:")]
+            if callsigns:
+                return [callsigns[0]]
+            # Last resort — accept unknown: prefixed if nothing else found
+            if enriched.get("callsigns"):
+                return [enriched["callsigns"][0]]
 
-<<<<<<< Updated upstream
-        unified = list(dict.fromkeys(ai_entities + ai_battle + extra))
+        return []
 
-        # entitiesOfInterest and battleEntity are always identical
-        merged_entities = unified
-        merged_battle   = unified
+    # Generate a short, unique base id for this assessment.
+    # Used as the envelope id AND as the prefix for each battleEffect id.
+    # Format: pae-<8-char-uuid>  →  effects become pae-<id>-e01, -e02, -e03
+    base_id = f"pae-{uuid.uuid4().hex[:8]}"
+
+    def _envelope(ai_fields: dict) -> list:
+        # entitiesOfInterest and battleEntity both contain the single most important subject
+        unified = _pick_most_important(ai_fields)
+
+        # Override AI-provided effect ids with unique ones derived from base_id
+        effects = ai_fields.get("battleEffects", [])
+        for i, effect in enumerate(effects, start=1):
+            effect["id"] = f"{base_id}-e{i:02d}"
 
         return [{
-            "id": str(uuid.uuid4()),
-            "requestId": request_id,
-            **( {"gbcId": gbc_id} if gbc_id else {} ),
-            "label": ai_fields.get("label", "Tactical Update"),
-            "description": ai_fields.get("description", ""),
-            "entitiesOfInterest": merged_entities,
-            "battleEntity": merged_battle,
-=======
-        # entitiesOfInterest and battleEntity are always identical
-        unified = list(dict.fromkeys(ai_entities + ai_battle + extra))
-
-        return [{
-            "id":          str(uuid.uuid4()),
+            "id":          base_id,
             "requestId":   request_id,
             **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label":       ai_fields.get("label", "Tactical Update"),
             "description": ai_fields.get("description", ""),
             "entitiesOfInterest": unified,
             "battleEntity":       unified,
->>>>>>> Stashed changes
-            "battleEffects": ai_fields.get("battleEffects", []),
+            "battleEffects": effects,
             "chat": [msg_content, "PAE generated for pre-emptive and defensive options."],
             "isDone":      False,
             "originator":  "rhino",
             "lastUpdated": now,
-<<<<<<< Updated upstream
-            "metadata": {},
-=======
             "metadata":    {},
->>>>>>> Stashed changes
         }]
 
     def _effect_stub(eid: str, operator: str, ranking: int, recommended: bool) -> dict:
@@ -351,90 +323,63 @@ def get_battle_assessment(
 
     def _error_record(reason: str) -> list:
         return [{
-<<<<<<< Updated upstream
-            "id": str(uuid.uuid4()),
-            "requestId": request_id,
-            **( {"gbcId": gbc_id} if gbc_id else {} ),
-            "label": "ERROR",
-=======
-            "id":          str(uuid.uuid4()),
+            "id":          base_id,
             "requestId":   request_id,
             **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label":       "ERROR",
->>>>>>> Stashed changes
             "description": reason,
             "entitiesOfInterest": [],
             "battleEntity":       [],
             "battleEffects": [
-                _effect_stub("pae-002-e01", "ERROR", 1, True),
-                _effect_stub("pae-002-e02", "ERROR", 2, False),
-                _effect_stub("pae-002-e03", "ERROR", 3, False),
+                _effect_stub(f"{base_id}-e01", "ERROR", 1, True),
+                _effect_stub(f"{base_id}-e02", "ERROR", 2, False),
+                _effect_stub(f"{base_id}-e03", "ERROR", 3, False),
             ],
             "chat":        [msg_content, "PAE generation failed."],
             "isDone":      False,
             "originator":  "rhino",
             "lastUpdated": now,
-<<<<<<< Updated upstream
-            "metadata": {},
-=======
             "metadata":    {},
->>>>>>> Stashed changes
         }]
 
     def _no_pae_record() -> list:
         return [{
-<<<<<<< Updated upstream
-            "id": str(uuid.uuid4()),
-            "requestId": request_id,
-            **( {"gbcId": gbc_id} if gbc_id else {} ),
-            "label": "NO PAE ACTION REQUIRED",
-=======
-            "id":          str(uuid.uuid4()),
+            "id":          base_id,
             "requestId":   request_id,
             **( {"gbcId": gbc_id} if gbc_id else {} ),
             "label":       "NO PAE ACTION REQUIRED",
->>>>>>> Stashed changes
             "description": "Message assessed — no pre-emptive or defensive action warranted.",
             "entitiesOfInterest": [],
             "battleEntity":       [],
             "battleEffects": [
-                _effect_stub("pae-002-e01", "NO PAE ACTION REQUIRED", 1, True),
-                _effect_stub("pae-002-e02", "NO PAE ACTION REQUIRED", 2, False),
-                _effect_stub("pae-002-e03", "NO PAE ACTION REQUIRED", 3, False),
+                _effect_stub(f"{base_id}-e01", "NO PAE ACTION REQUIRED", 1, True),
+                _effect_stub(f"{base_id}-e02", "NO PAE ACTION REQUIRED", 2, False),
+                _effect_stub(f"{base_id}-e03", "NO PAE ACTION REQUIRED", 3, False),
             ],
             "chat":        [msg_content, "PAE generated for pre-emptive and defensive options."],
             "isDone":      False,
             "originator":  "rhino",
             "lastUpdated": now,
-<<<<<<< Updated upstream
-            "metadata": {},
-        }]
-
-    def _effect_stub(eid: str, operator: str, ranking: int, recommended: bool) -> dict:
-        score_map = {1: 1.0, 2: 0.6, 3: 0.3}
-        return {
-            "id": eid,
-            "effectOperator": operator,
-            "description": None,
-            "timeWindow": None,
-            "stateHypothesis": None,
-            "opsLimits": [{"description": None, "battleEntity": None, "stateHypothesis": None}],
-            "goalContributions": [{"battleGoal": None, "effect": None}],
-            "recommended": recommended,
-            "alignmentScore": score_map.get(ranking, 0.3),
-        }
-
-=======
             "metadata":    {},
         }]
 
->>>>>>> Stashed changes
+    import time
+
     try:
         headers = {"Content-Type": "application/json"}
         if provider == "nanogpt" and api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         print(f"AI PROVIDER: {provider.upper()}  MODEL: {payload['model']}")
-        response = requests.post(lm_url, json=payload, headers=headers, timeout=timeout)
+
+        # Retry once on 400 — LM Studio can reject if still busy from previous request
+        for attempt in range(2):
+            response = requests.post(lm_url, json=payload, headers=headers, timeout=timeout)
+            if response.status_code == 400 and attempt == 0:
+                print(f"WARNING: LM Studio returned 400 — waiting 3s before retry...")
+                time.sleep(3)
+                continue
+            break
+
         response.raise_for_status()
 
         full_response = response.json()
@@ -490,10 +435,6 @@ def get_battle_assessment(
         print(f"WARNING: Cannot reach AI provider at {lm_url}.")
         return _error_record(f"Cannot reach AI provider at {lm_url}.")
     except requests.exceptions.HTTPError as e:
-<<<<<<< Updated upstream
-        # Print the full response body so we can see exactly what LM Studio rejected
-=======
->>>>>>> Stashed changes
         body = ""
         try:
             body = e.response.text if e.response else ""
@@ -501,10 +442,6 @@ def get_battle_assessment(
             pass
         print(f"WARNING: AI provider HTTP error: {e}.")
         print(f"WARNING: LM Studio response body: {body}")
-<<<<<<< Updated upstream
-        print(f"WARNING: Payload sent:\n{json.dumps(payload, indent=2)[:2000]}")
-=======
->>>>>>> Stashed changes
         return _error_record(f"HTTP error: {e}.")
     except (ValueError, KeyError) as e:
         print(f"WARNING: Unexpected response structure ({type(e).__name__}: {e}).")

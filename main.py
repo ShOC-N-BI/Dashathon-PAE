@@ -155,10 +155,7 @@ def run_pipeline(
         print("INFO: DB not configured — skipping database write.")
 
     # -- Step 7: Push to GBC API (only if GBC_API_URL is configured in .env)
-<<<<<<< Updated upstream
-=======
     print(f"GBC_API_URL: {config.GBC_API_URL or 'NOT SET'}")
->>>>>>> Stashed changes
     if config.GBC_API_URL:
         gbc_api_client.push(tactical_json, api_url=config.GBC_API_URL)
     else:
