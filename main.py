@@ -8,7 +8,7 @@ from client.pae_sse_client import PaeSseClient
 from client.pae_output_client import submit as submit_pae_output
 from irc.listener import start as irc_start
 from output import log_writer, db_writer, gbc_api_client
-from pipeline.builder import make_request_id
+from pipeline.builder import make_request_id, extract_track_id, extract_request_id
 from pipeline.triage import is_relevant
 from pipeline.enricher import classify, extract_context, fetch_track
 from schemas.pae_schemas import PaeInputCreated, PaeOutput
@@ -72,18 +72,24 @@ def run_pipeline(
     request_id: str,
     gbc_id:     str | None = None,
     channel:    str | None = None,
+    track_id:   str | None = None,
 ) -> None:
     """
     Run the full PAE pipeline for one message:
-        filter → AI → validate schema → POST to orchestrator → log
+        triage → classify → AI assessment → log → DB → GBC → orchestrator → dashboard
 
     Parameters
     ----------
+    live       : Rich Live dashboard handle.
     message    : Raw J-chat message text to assess.
     username   : Originator label (IRC nick or SSE originator field).
     source     : "IRC" or "SSE" — shown in the dashboard.
-    request_id : Unique track ID for this assessment.
+    request_id : Unique request ID for this assessment in DDRR-rr format.
     gbc_id     : Optional GBC ID from the SSE trigger (None for IRC messages).
+    channel    : Optional IRC channel name (used by the classify API).
+    track_id   : Optional track identifier (TN700, TS016, etc.).
+                 For SSE: the validated trackId from the event.
+                 For IRC: extracted from the message text if present.
     """
     live.update(make_dashboard(message, username, None, "TRIAGING...", source))
 
@@ -136,6 +142,7 @@ def run_pipeline(
         api_key=ai["api_key"],
         enriched=enriched,
         gbc_id=gbc_id,
+        track_id=track_id,
     )
 
     # -- Step 5: Write to local log (always, regardless of orchestrator availability)
@@ -195,16 +202,100 @@ def run_pipeline(
 # PATH 1 — IRC handler
 # ---------------------------------------------------------------------------
 
+def _is_pit_boss_review_blocked(message: str) -> bool:
+    """
+    Returns True (block) if any sentence in the message contains BOTH
+    'pit boss' AND 'review' together.
+
+    Returns False (allow) if the message contains 'pit boss' without 'review'
+    in the same sentence, or has neither.
+
+    Rule:
+        pit boss + review  in same sentence → BLOCKED
+        pit boss only                       → ALLOWED
+        review only (no pit boss)           → ALLOWED
+        neither                             → ALLOWED
+    """
+    import re as _re
+    # Split into sentences on . ! ? and newlines
+    sentences = _re.split('[.!?]+', message.replace('\n', '.').lower())
+    for sentence in sentences:
+        has_pit_boss = "pit boss" in sentence
+        has_review   = "review"   in sentence
+        if has_pit_boss and has_review:
+            return True  # block
+    return False          # allow
+
+
+def _is_coa_selection_message(message: str) -> bool:
+    """
+    Returns True (block) for COA option review and selection/rejection messages.
+
+    Matches these operator traffic patterns:
+        @vegas_abm_2 review 1100-01 A        — review request
+        1100-01 F no go                       — rejection response
+        COA 1100-01 A no-go, reason here     — COA rejection with reason
+
+    Pattern: a 4-digit + dash + 2-digit ID (e.g. 1100-01) paired with a
+    single letter option (A-F), optionally followed by "no go" / "no-go".
+    """
+    import re as _re
+    msg = message.lower()
+
+    # Pattern 1: "review NNNN-NN [A-F]" — COA review request
+    # Matches with or without @mention prefix
+    if _re.search(r'\breview\s+\d{4}-\d{2}\s+[a-f]\b', msg):
+        return True
+
+    # Pattern 2: "NNNN-NN [A-F] no go" or "NNNN-NN [A-F] no-go" — rejection
+    if _re.search(r'\b\d{4}-\d{2}\s+[a-f]\s+no[- ]?go\b', msg):
+        return True
+
+    # Pattern 3: "COA NNNN-NN [A-F] ..." — any COA selection/rejection line
+    if _re.search(r'\bcoa\s+\d{4}-\d{2}\s+[a-f]\b', msg):
+        return True
+
+    return False
+
+
 def on_irc_message(live: Live, username: str, message: str) -> None:
-    """Called by irc.listener for every incoming J-chat message."""
+    """
+    Called by irc.listener for every incoming J-chat message.
+
+    Request ID handling:
+        1. Try to extract a DDRR-rr request ID embedded in the message
+           (this is the standard for J-chat traffic).
+        2. If none is present, fall back to the auto-generated counter
+           from RUN_DAY/RUN_NUMBER in .env (set via the config UI).
+    """
+    # -- Keyword filter: block messages where "pit boss" and "review"
+    # appear together in the same sentence
+    if _is_pit_boss_review_blocked(message):
+        print(f"FILTER: blocked — 'pit boss' + 'review' in same sentence: '{message[:60]}'")
+        return
+
+    # -- COA selection filter: block operator review/rejection traffic
+    if _is_coa_selection_message(message):
+        print(f"FILTER: blocked — COA selection/review message: '{message[:60]}'")
+        return
+
+    embedded_id = extract_request_id(message)
+    if embedded_id:
+        request_id = embedded_id
+        print(f"REQUEST ID: extracted from message → {request_id}")
+    else:
+        request_id = make_request_id()
+        print(f"REQUEST ID: no ID in message — generated fallback → {request_id}")
+
     run_pipeline(
         live=live,
         message=message,
         username=username,
         source="IRC",
-        request_id=make_request_id(),
+        request_id=request_id,
         gbc_id=None,
         channel=config.IRC_CHANNEL.split(",")[0].strip(),
+        track_id=extract_track_id(message),
     )
 
 
@@ -248,7 +339,8 @@ def on_sse_event(live: Live, event: PaeInputCreated) -> None:
         ))
         return
 
-    # -- Step 2: Validate track against Track API
+    # -- Step 2: Validate track against Track API and collect track data for AI
+    track_message = message  # default — bare trackId string
     if config.TRACK_API_URL:
         live.update(make_dashboard(message, pae.originator, None, "VALIDATING TRACK...", "SSE"))
         track_data = fetch_track(
@@ -263,18 +355,28 @@ def on_sse_event(live: Live, event: PaeInputCreated) -> None:
                 "REJECTED — NO TRACK DATA", "SSE"
             ))
             return
-        console.log(f"[green]SSE: track '{message}' validated — proceeding to assessment.[/green]")
+        # Serialize the full track data so the AI receives rich context,
+        # not just a bare track ID string
+        import json as _json
+        if isinstance(track_data, dict):
+            track_message = _json.dumps(track_data)
+        elif isinstance(track_data, str):
+            track_message = track_data
+        else:
+            track_message = str(track_data)
+        console.log(f"[green]SSE: track '{message}' validated — passing {len(track_message)} chars of track data to AI.[/green]")
     else:
         # TRACK_API_URL not configured — log warning but allow through
         console.log(f"[yellow]SSE: TRACK_API_URL not set — skipping track validation for '{message}'.[/yellow]")
 
     run_pipeline(
         live=live,
-        message=message,
+        message=track_message,     # full track data from the API, not just the trackId
         username=pae.originator,
         source="SSE",
         request_id=pae.request_id,
         gbc_id=pae.gbc_id,
+        track_id=track_clean.upper(),
     )
 
 

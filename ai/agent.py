@@ -221,6 +221,7 @@ def get_battle_assessment(
     api_key: str = "",
     enriched: dict = None,
     gbc_id: str = None,
+    track_id: str = None,
 ) -> list:
     payload = {
         "model": lm_model,
@@ -280,7 +281,7 @@ def get_battle_assessment(
     # Generate a short, unique base id for this assessment.
     # Used as the envelope id AND as the prefix for each battleEffect id.
     # Format: pae-<8-char-uuid>  →  effects become pae-<id>-e01, -e02, -e03
-    base_id = f"pae-{uuid.uuid4().hex[:8]}"
+    base_id = f"pae-rhino-{uuid.uuid4().hex[:8]}"
 
     def _envelope(ai_fields: dict) -> list:
         # entitiesOfInterest and battleEntity both contain the single most important subject
@@ -294,7 +295,8 @@ def get_battle_assessment(
         return [{
             "id":          base_id,
             "requestId":   request_id,
-            **( {"gbcId": gbc_id} if gbc_id else {} ),
+            **( {"gbcId":   gbc_id}   if gbc_id   else {} ),
+            **( {"trackId": track_id} if track_id else {} ),
             "label":       ai_fields.get("label", "Tactical Update"),
             "description": ai_fields.get("description", ""),
             "entitiesOfInterest": unified,
@@ -325,7 +327,8 @@ def get_battle_assessment(
         return [{
             "id":          base_id,
             "requestId":   request_id,
-            **( {"gbcId": gbc_id} if gbc_id else {} ),
+            **( {"gbcId":   gbc_id}   if gbc_id   else {} ),
+            **( {"trackId": track_id} if track_id else {} ),
             "label":       "ERROR",
             "description": reason,
             "entitiesOfInterest": [],
@@ -346,7 +349,8 @@ def get_battle_assessment(
         return [{
             "id":          base_id,
             "requestId":   request_id,
-            **( {"gbcId": gbc_id} if gbc_id else {} ),
+            **( {"gbcId":   gbc_id}   if gbc_id   else {} ),
+            **( {"trackId": track_id} if track_id else {} ),
             "label":       "NO PAE ACTION REQUIRED",
             "description": "Message assessed — no pre-emptive or defensive action warranted.",
             "entitiesOfInterest": [],

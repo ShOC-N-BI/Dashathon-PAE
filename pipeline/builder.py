@@ -87,17 +87,31 @@ def current_state() -> dict:
     }
 
 
+
+def extract_track_id(message: str) -> str | None:
+    """
+    Extract a track ID from a message string.
+    Matches 2-letter prefix followed by digits (TN700, TS016, TL005, TT024 etc.)
+    Returns the FIRST track ID found, uppercased, or None if none present.
+    """
+    import re
+    # Look for word-boundary 2-letter + digits patterns
+    match = re.search(r"\b([A-Za-z]{2}\d+)\b", message)
+    return match.group(1).upper() if match else None
+
+
 def extract_request_id(message: str) -> str | None:
     """
     Extract a DDRR-rr format request ID from an IRC message.
 
     Looks for a pattern of 4 digits, a dash, and 2 digits (e.g. 0602-02).
-    Returns the first match found, or None if no ID is present.
+    Returns the first match found, or None if the message has no embedded ID.
 
     Examples:
         "gen bcoa using rainmaker jtn tn044 0602-02 B pls" → "0602-02"
+        "@vegas_pit_a bcoa options ... 0802-01 pls"        → "0802-01"
         "TBM launch detected at PB1.2"                     → None
     """
     import re
-    match = re.search(r'\b(\d{4}-\d{2})\b', message)
+    match = re.search(r"\b(\d{4}-\d{2})\b", message)
     return match.group(1) if match else None

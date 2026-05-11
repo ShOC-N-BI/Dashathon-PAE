@@ -19,7 +19,6 @@ COPY irc/             ./irc/
 COPY output/          ./output/
 COPY pipeline/        ./pipeline/
 COPY schemas/         ./schemas/
-COPY sse/             ./sse/
 COPY tests/           ./tests/
 COPY data/            ./data/
 COPY pae_config.py    .

@@ -13,6 +13,8 @@ Routes:
     GET  /assessments     — returns full history as JSON
     GET  /assessments/sse — SSE stream for live dashboard updates
     GET  /json             — raw JSON viewer tab
+    GET  /test             — SSE retrigger test panel
+    POST /test/retrigger   — fire a PaeInputCreated event to the orchestrator
 """
 
 import json
@@ -22,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -95,15 +98,15 @@ EDITABLE_FIELDS = {
         "type":        "password",
     },
     "RUN_DAY": {
-        "label":       "Run Day (DD)",
-        "description": "Day number for the DDRR-rr request ID format (e.g. 01)",
+        "label":       "Fallback Day (DD)",
+        "description": "Day used in the fallback DDRR-rr format when the IRC message has no embedded request ID",
         "placeholder": "01",
         "type":        "number",
         "section":     "run",
     },
     "RUN_NUMBER": {
-        "label":       "Run Number (RR)",
-        "description": "Run number within the day — changing this resets the request counter",
+        "label":       "Fallback Run (RR)",
+        "description": "Run number used in the fallback DDRR-rr format — changing this resets the fallback counter",
         "placeholder": "01",
         "type":        "number",
         "section":     "run",
@@ -446,6 +449,63 @@ def serve_json_viewer():
 def serve_classify_tab():
     return HTMLResponse(content=CLASSIFY_TAB_HTML)
 
+
+@app.get("/test", response_class=HTMLResponse)
+def serve_test_tab():
+    return HTMLResponse(content=TEST_TAB_HTML)
+
+
+@app.post("/test/retrigger")
+async def fire_retrigger(request: Request):
+    """
+    Forward a PaeInputCreated event to the orchestrator's /paeinputs endpoint.
+    Used to manually test the SSE retrigger pipeline from the UI.
+    """
+    body = await request.json()
+    track_id  = body.get("trackId", "").strip().upper()
+    gbc_id    = body.get("gbcId", "").strip() or None
+    originator = body.get("originator", "test-ui").strip()
+    request_id = body.get("requestId", "0000-00").strip()
+
+    if not track_id:
+        raise HTTPException(status_code=400, detail="trackId is required")
+
+    payload = {
+        "paeInput": {
+            "requestId":  request_id,
+            "trackId":    track_id,
+            "originator": originator,
+        }
+    }
+    if gbc_id:
+        payload["paeInput"]["gbcId"] = gbc_id
+
+    try:
+        env = {}
+        if ENV_PATH.exists():
+            for line in ENV_PATH.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
+        orchestrator_url = env.get("ORCHESTRATOR_BASE_URL", "http://emulator:3016")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                f"{orchestrator_url}/paeinputs",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+        return {
+            "status":      "sent",
+            "trackId":     track_id,
+            "requestId":   request_id,
+            "orchestrator": orchestrator_url,
+            "response":    r.status_code,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach orchestrator: {e}")
+
 # ---------------------------------------------------------------------------
 # CONFIG UI HTML
 # ---------------------------------------------------------------------------
@@ -538,6 +598,7 @@ CONFIG_HTML = """<!DOCTYPE html>
     <a href="/dashboard">Dashboard</a>
     <a href="/json">JSON</a>
     <a href="/classify">Classify</a>
+    <a href="/test">Test</a>
   </nav>
 </header>
 <main>
@@ -550,9 +611,9 @@ CONFIG_HTML = """<!DOCTYPE html>
   </div>
   <div class="run-panel">
     <div>
-      <div class="run-id-label">Current Request ID Format</div>
+      <div class="run-id-label">Fallback Request ID — used only when no ID is found in the IRC message</div>
       <div class="run-id-preview" id="run-preview">????-??</div>
-      <div class="run-counter" id="run-counter">requests this run: 0</div>
+      <div class="run-counter" id="run-counter">fallback IDs generated this run: 0</div>
     </div>
     <div class="run-fields">
       <div class="run-field">
@@ -697,7 +758,7 @@ CONFIG_HTML = """<!DOCTYPE html>
       const res=await fetch('/run/state');const d=await res.json();
       document.getElementById('run-day').value=parseInt(d.day)||1;
       document.getElementById('run-run').value=parseInt(d.run)||1;
-      document.getElementById('run-counter').textContent='requests this run: '+d.count;
+      document.getElementById('run-counter').textContent='fallback IDs generated this run: '+d.count;
       updateRunPreview();
     }catch(e){}
   }
@@ -715,7 +776,7 @@ CONFIG_HTML = """<!DOCTYPE html>
   }
   async function resetCounter(){
     const res=await fetch('/run/reset',{method:'POST'});
-    if(res.ok){showToast('Counter reset to 0',true);await loadRunState();}
+    if(res.ok){showToast('Fallback counter reset to 0',true);await loadRunState();}
     else showToast('Reset failed.',false);
   }
   loadEnv();loadStatus();loadRunState();setInterval(loadStatus,10000);setInterval(loadRunState,5000);
@@ -811,6 +872,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <a href="/dashboard" class="active">Dashboard</a>
     <a href="/json">JSON</a>
     <a href="/classify">Classify</a>
+    <a href="/test">Test</a>
   </nav>
   <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
 </header>
@@ -1043,6 +1105,7 @@ JSON_VIEWER_HTML = r"""<!DOCTYPE html>
     <a href="/dashboard">Dashboard</a>
     <a href="/json" class="active">JSON</a>
     <a href="/classify">Classify</a>
+    <a href="/test">Test</a>
   </nav>
   <div class="live-badge"><div class="dot"></div><span id="live-status">CONNECTING...</span></div>
 </header>
@@ -1483,6 +1546,251 @@ CLASSIFY_TAB_HTML = r"""<!DOCTYPE html>
 
   loadHistory();
   connectSSE();
+</script>
+</body>
+</html>"""
+
+# ---------------------------------------------------------------------------
+# TEST TAB HTML
+# ---------------------------------------------------------------------------
+
+TEST_TAB_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAE Test</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+    :root{
+      --bg:#060a0f;--surface:#0b1219;--surface2:#0f1a24;--border:#162030;
+      --accent:#00e5ff;--accent2:#ff6b35;--accent3:#7fff6b;--accent4:#a855f7;
+      --text:#b8ccd8;--muted:#3a5060;--mono:'Share Tech Mono',monospace;
+      --sans:'Rajdhani',sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;}
+    body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,.008) 3px,rgba(0,229,255,.008) 4px);pointer-events:none;z-index:1000;}
+    header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+    .logo{display:flex;align-items:center;gap:12px;}
+    .logo-badge{width:34px;height:34px;border:2px solid var(--accent2);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--accent2);}
+    .logo-text{font-size:14px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--accent2);}
+    .logo-sub{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;}
+    nav{display:flex;gap:4px;}
+    nav a{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:8px 16px;border:1px solid transparent;transition:.2s;}
+    nav a:hover{color:var(--accent);border-color:var(--border);}
+    nav a.active{color:var(--accent2);border-color:var(--accent2);background:rgba(255,107,53,.05);}
+
+    main{max-width:860px;margin:0 auto;padding:40px 32px;}
+
+    .section-label{font-family:var(--mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:12px;margin-bottom:20px;}
+    .section-label::after{content:'';flex:1;height:1px;background:var(--border);}
+
+    .card{background:var(--surface);border:1px solid var(--border);padding:28px 30px;margin-bottom:24px;}
+    .card-title{font-family:var(--mono);font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--accent2);margin-bottom:20px;}
+
+    .field-row{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;}
+    .field-label{font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);}
+    .field-hint{font-family:var(--mono);font-size:10px;color:var(--muted);opacity:.6;margin-top:2px;}
+    input[type=text]{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:13px;padding:10px 14px;outline:none;transition:.2s;}
+    input[type=text]:focus{border-color:var(--accent2);box-shadow:0 0 0 1px var(--accent2);}
+    input[type=text]::placeholder{color:var(--muted);}
+
+    .btn-fire{width:100%;padding:16px;font-family:var(--mono);font-size:12px;letter-spacing:3px;text-transform:uppercase;background:transparent;border:1px solid var(--accent2);color:var(--accent2);cursor:pointer;transition:.2s;margin-top:8px;}
+    .btn-fire:hover{background:rgba(255,107,53,.08);}
+    .btn-fire:disabled{opacity:.4;cursor:not-allowed;}
+
+    .result-box{background:var(--surface2);border:1px solid var(--border);padding:16px;margin-top:20px;font-family:var(--mono);font-size:12px;min-height:60px;display:none;}
+    .result-box.show{display:block;}
+    .result-ok{color:var(--accent3);}
+    .result-err{color:var(--accent2);}
+
+    .log-panel{background:var(--surface);border:1px solid var(--border);padding:0;overflow:hidden;}
+    .log-header{padding:14px 20px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:center;}
+    .log-clear{background:transparent;border:none;color:var(--muted);font-family:var(--mono);font-size:10px;cursor:pointer;letter-spacing:1px;}
+    .log-clear:hover{color:var(--accent2);}
+    .log-entries{height:260px;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px;}
+    .log-entry{padding:10px 14px;border:1px solid var(--border);background:var(--bg);}
+    .log-entry-time{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:4px;}
+    .log-entry-track{font-family:var(--mono);font-size:13px;color:var(--accent2);font-weight:700;}
+    .log-entry-status{font-family:var(--mono);font-size:11px;margin-top:4px;}
+    .ok{color:var(--accent3);}
+    .err{color:var(--accent2);}
+
+    .quick-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+    .quick-btn{font-family:var(--mono);font-size:10px;letter-spacing:1px;padding:6px 14px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:.2s;}
+    .quick-btn:hover{border-color:var(--accent);color:var(--accent);}
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-badge">TST</div>
+    <div><div class="logo-text">Retrigger Test</div><div class="logo-sub">Pre-emptive Action Engine</div></div>
+  </div>
+  <nav>
+    <a href="/">Config</a>
+    <a href="/dashboard">Dashboard</a>
+    <a href="/json">JSON</a>
+    <a href="/classify">Classify</a>
+    <a href="/test" class="active">Test</a>
+  </nav>
+</header>
+
+<main>
+  <div class="section-label">Fire SSE Retrigger</div>
+
+  <div class="card">
+    <div class="card-title">Retrigger Payload</div>
+
+    <div class="field-row">
+      <div class="field-label">Track ID <span style="color:var(--accent2)">*</span></div>
+      <input type="text" id="trackId" placeholder="TN700" maxlength="20"/>
+      <div class="field-hint">Two-letter prefix followed by digits — e.g. TN700, TS016, TL005</div>
+    </div>
+
+    <div class="field-row">
+      <div class="field-label">Request ID</div>
+      <input type="text" id="requestId" placeholder="0101-01" maxlength="10"/>
+      <div class="field-hint">DDRR-rr format — auto-filled if left blank</div>
+    </div>
+
+    <div class="field-row">
+      <div class="field-label">GBC ID <span style="color:var(--muted)">(optional)</span></div>
+      <input type="text" id="gbcId" placeholder="gbc-abc123"/>
+      <div class="field-hint">Included in the PAE output if provided</div>
+    </div>
+
+    <div class="field-row">
+      <div class="field-label">Originator</div>
+      <input type="text" id="originator" placeholder="test-ui" maxlength="40"/>
+    </div>
+
+    <div class="quick-row">
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted);align-self:center;">Quick fill:</span>
+      <button class="quick-btn" onclick="quickFill('TN700','0101-01')">TN700</button>
+      <button class="quick-btn" onclick="quickFill('TS016','0101-02')">TS016</button>
+      <button class="quick-btn" onclick="quickFill('TL005','0101-03')">TL005</button>
+      <button class="quick-btn" onclick="quickFill('TT024','0101-04')">TT024</button>
+    </div>
+
+    <button class="btn-fire" id="fire-btn" onclick="fireRetrigger()">⚡ FIRE RETRIGGER</button>
+
+    <div class="result-box" id="result"></div>
+  </div>
+
+  <div class="section-label">Retrigger History</div>
+
+  <div class="log-panel">
+    <div class="log-header">
+      <span>Last fired retriggers</span>
+      <button class="log-clear" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="log-entries" id="log">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:16px 0;">No retriggers fired yet.</div>
+    </div>
+  </div>
+</main>
+
+<script>
+  const log = [];
+
+  function quickFill(track, req){
+    document.getElementById('trackId').value  = track;
+    document.getElementById('requestId').value = req;
+    document.getElementById('originator').value = 'test-ui';
+  }
+
+  async function fireRetrigger(){
+    const trackId   = document.getElementById('trackId').value.trim().toUpperCase();
+    const requestId = document.getElementById('requestId').value.trim() || autoRequestId();
+    const gbcId     = document.getElementById('gbcId').value.trim();
+    const originator = document.getElementById('originator').value.trim() || 'test-ui';
+
+    if(!trackId){
+      showResult('Track ID is required.', false);
+      return;
+    }
+    if(!/^[A-Za-z]{2}\d+$/.test(trackId)){
+      showResult(`"${trackId}" is not a valid track format. Use 2 letters + digits (e.g. TN700).`, false);
+      return;
+    }
+
+    const btn = document.getElementById('fire-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ SENDING...';
+
+    const payload = {trackId, requestId, originator};
+    if(gbcId) payload.gbcId = gbcId;
+
+    try{
+      const res = await fetch('/test/retrigger', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if(res.ok){
+        showResult(`✅ Sent to ${data.orchestrator} — orchestrator responded ${data.response}`, true);
+        addLog(trackId, requestId, data.orchestrator, data.response, true);
+      } else {
+        showResult(`❌ ${data.detail || 'Request failed'}`, false);
+        addLog(trackId, requestId, '?', res.status, false);
+      }
+    } catch(e){
+      showResult(`❌ Network error: ${e.message}`, false);
+      addLog(trackId, requestId, '?', 'ERROR', false);
+    }
+
+    btn.disabled = false;
+    btn.textContent = '⚡ FIRE RETRIGGER';
+  }
+
+  function autoRequestId(){
+    const now = new Date();
+    const mm = String(now.getMonth()+1).padStart(2,'0');
+    const dd = String(now.getDate()).padStart(2,'0');
+    const rr = String(Math.floor(Math.random()*99)+1).padStart(2,'0');
+    return `${mm}${dd}-${rr}`;
+  }
+
+  function showResult(msg, ok){
+    const box = document.getElementById('result');
+    box.className = 'result-box show ' + (ok ? 'result-ok' : 'result-err');
+    box.textContent = msg;
+  }
+
+  function addLog(track, req, dest, status, ok){
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    entry.innerHTML = `
+      <div class="log-entry-time">${now}</div>
+      <div class="log-entry-track">${track}</div>
+      <div class="log-entry-status ${ok ? 'ok' : 'err'}">
+        requestId: ${req} &nbsp;|&nbsp; dest: ${dest} &nbsp;|&nbsp; status: ${status}
+      </div>`;
+    const container = document.getElementById('log');
+    const empty = container.querySelector('div[style]');
+    if(empty) empty.remove();
+    container.insertBefore(entry, container.firstChild);
+  }
+
+  function clearLog(){
+    const container = document.getElementById('log');
+    container.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:16px 0;">No retriggers fired yet.</div>';
+  }
+
+  // Allow Enter key in trackId field to fire
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('trackId').addEventListener('keydown', e => {
+      if(e.key === 'Enter') fireRetrigger();
+    });
+    document.getElementById('requestId').addEventListener('keydown', e => {
+      if(e.key === 'Enter') fireRetrigger();
+    });
+  });
 </script>
 </body>
 </html>"""

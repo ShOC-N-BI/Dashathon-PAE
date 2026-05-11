@@ -85,6 +85,7 @@ class PaeOutput(BaseModel):
     description:          str
     request_id:           str                 = Field(alias="requestId")
     gbc_id:               Optional[str]        = Field(alias="gbcId",              default=None)
+    track_id:             Optional[str]        = Field(alias="trackId",            default=None)
     entities_of_interest: list[str]            = Field(alias="entitiesOfInterest", default_factory=list)
     battle_entity:        Optional[list[str]] = Field(alias="battleEntity",       default=None)
     battle_effects:       list[PaeEffect]     = Field(alias="battleEffects",      default_factory=list)
